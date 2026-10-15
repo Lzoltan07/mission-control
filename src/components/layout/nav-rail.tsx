@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/lib/version'
 import { getPluginNavItems } from '@/lib/plugins'
+import '@/plugins/agent-os' // Agent OS fork: registers the "Heti terv" tab
 import { apiFetch } from '@/lib/api-client'
 
 interface NavItem {

@@ -365,6 +365,8 @@ const TOOLS = [
         assigned_to: { type: 'string', description: 'New assignee agent name' },
         title: { type: 'string', description: 'New title' },
         description: { type: 'string', description: 'New description' },
+        // Agent OS fork: expose resolution so agents hand off their full result (Aegis reviews this field)
+        resolution: { type: 'string', description: 'Full result of the work; the Aegis quality review reads this field' },
       },
       required: ['id'],
     },
