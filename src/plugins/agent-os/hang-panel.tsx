@@ -3,7 +3,8 @@
 /**
  * Agent OS – "Hang" tab (fork addition). Push-to-talk conversation with the voice agent:
  * microphone → 16 kHz mono WAV in the browser → /api/agent-os/voice/transcribe (local whisper.cpp)
- * → /api/agent-os/voice/ask (hang-asszisztens) → answer read aloud with the system's Hungarian voice.
+ * → /api/agent-os/voice/ask (hang-asszisztens) → answer read aloud: Piper voices through
+ * /api/agent-os/voice/speak (local, preferred) or the system's Hungarian voice (speechSynthesis).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,8 @@ const VOICE_KEY = 'aos-hang-voice'
 const SPEAK_KEY = 'aos-hang-speak'
 const RATE_KEY = 'aos-hang-rate'
 const RATES = [1, 1.25, 1.5, 1.75, 2]
+const PIPER = 'piper:' // voice select values: "piper:<voice id>" or a system voice name
+const piperLabel = (id: string) => 'Piper – ' + (id.split('-')[1] || id).replace(/^./, c => c.toUpperCase())
 
 function encodeWav(chunks: Float32Array[], inputRate: number): Blob {
   const length = chunks.reduce((n, c) => n + c.length, 0)
@@ -54,12 +57,16 @@ export function HangPanel() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState<string | null>(null)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+  const [piperVoices, setPiperVoices] = useState<string[]>([])
   const [voiceName, setVoiceName] = useState<string>('')
   const [speak, setSpeak] = useState(true)
   const [rate, setRate] = useState(1.5)
   const [typed, setTyped] = useState('')
   const rec = useRef<{ stream: MediaStream; ctx: AudioContext; node: ScriptProcessorNode; chunks: Float32Array[] } | null>(null)
   const started = useRef(0)
+  // Web Audio, not <audio src=blob:>: Mission Control's CSP has no media-src, so blob: media is blocked.
+  const audio = useRef<AudioContext | null>(null)
+  const speakSeq = useRef(0)
 
   // Hungarian voices of the OS/browser (macOS: Mariska; Windows: Szabolcs; Chrome: Google magyar).
   useEffect(() => {
@@ -78,16 +85,61 @@ export function HangPanel() {
     return () => window.speechSynthesis.removeEventListener('voiceschanged', pick)
   }, [])
 
-  const say = useCallback((text: string) => {
-    if (!speak || !window.speechSynthesis) return
-    window.speechSynthesis.cancel()
+  // Local Piper voices (preferred when no voice was chosen yet).
+  useEffect(() => {
+    apiFetch<{ voices: string[] }>('/api/agent-os/voice/speak').then(({ voices: list }) => {
+      setPiperVoices(list)
+      const saved = readPref(VOICE_KEY)
+      setVoiceName(prev => {
+        if (saved?.startsWith(PIPER) && list.includes(saved.slice(PIPER.length))) return saved
+        if (!saved && list.length > 0) return PIPER + list[0]
+        return prev
+      })
+    }).catch(() => setPiperVoices([]))
+  }, [])
+
+  const stopSpeaking = useCallback(() => {
+    speakSeq.current++
+    window.speechSynthesis?.cancel()
+    if (audio.current) { void audio.current.close(); audio.current = null }
+  }, [])
+
+  const sayWithSystem = useCallback((text: string, name: string) => {
+    if (!window.speechSynthesis) return
     const u = new SpeechSynthesisUtterance(text)
     u.lang = 'hu-HU'
     u.rate = rate
-    const v = voices.find(x => x.name === voiceName)
+    const v = voices.find(x => x.name === name)
     if (v) u.voice = v
     window.speechSynthesis.speak(u)
-  }, [speak, voices, voiceName, rate])
+  }, [voices, rate])
+
+  const say = useCallback(async (text: string) => {
+    if (!speak) return
+    stopSpeaking()
+    if (!voiceName.startsWith(PIPER)) { sayWithSystem(text, voiceName); return }
+    const seq = speakSeq.current
+    try {
+      const res = await apiFetch<Response>('/api/agent-os/voice/speak', {
+        method: 'POST', raw: true, body: JSON.stringify({ text, voice: voiceName.slice(PIPER.length), rate }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const wav = await res.arrayBuffer()
+      if (seq !== speakSeq.current) return // stopped or replaced meanwhile
+      const ctx = new AudioContext()
+      audio.current = ctx
+      const source = ctx.createBufferSource()
+      source.buffer = await ctx.decodeAudioData(wav)
+      source.connect(ctx.destination)
+      source.onended = () => { void ctx.close(); if (audio.current === ctx) audio.current = null }
+      if (ctx.state === 'suspended') await ctx.resume()
+      source.start()
+    } catch {
+      if (seq !== speakSeq.current) return
+      setError('A Piper-felolvasás nem érhető el, a rendszerhanggal olvasom.')
+      sayWithSystem(text, voices.find(v => !v.localService)?.name || voices[0]?.name || '')
+    }
+  }, [speak, voiceName, rate, voices, stopSpeaking, sayWithSystem])
 
   const ask = useCallback(async (kerdes: string) => {
     const history = turns
@@ -98,7 +150,7 @@ export function HangPanel() {
         method: 'POST', body: JSON.stringify({ kerdes, elozmeny: history }),
       })
       setTurns(t => [...t, { ki: 'agens', szoveg: valasz }])
-      say(valasz)
+      void say(valasz)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Az ágens nem válaszolt')
     } finally {
@@ -108,7 +160,7 @@ export function HangPanel() {
 
   const startRecording = useCallback(async () => {
     setError(null)
-    window.speechSynthesis?.cancel()
+    stopSpeaking()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
       const ctx = new AudioContext()
@@ -123,7 +175,7 @@ export function HangPanel() {
     } catch {
       setError('A mikrofon nem érhető el (engedélyezd a böngészőben).')
     }
-  }, [])
+  }, [stopSpeaking])
 
   const stopRecording = useCallback(async () => {
     const r = rec.current
@@ -166,19 +218,24 @@ export function HangPanel() {
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-xl font-bold text-foreground mr-2">Hang</h2>
         <label className="text-sm text-muted-foreground flex items-center gap-1">
-          <input type="checkbox" checked={speak} onChange={e => { setSpeak(e.target.checked); writePref(SPEAK_KEY, e.target.checked ? '1' : '0'); if (!e.target.checked) window.speechSynthesis?.cancel() }} />
+          <input type="checkbox" checked={speak} onChange={e => { setSpeak(e.target.checked); writePref(SPEAK_KEY, e.target.checked ? '1' : '0'); if (!e.target.checked) stopSpeaking() }} />
           Felolvasás
         </label>
         <select className="rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground" value={voiceName}
-          onChange={e => { setVoiceName(e.target.value); writePref(VOICE_KEY, e.target.value) }} disabled={voices.length === 0}>
-          {voices.length === 0 && <option value="">Nincs magyar hang a rendszerben</option>}
-          {voices.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+          onChange={e => { setVoiceName(e.target.value); writePref(VOICE_KEY, e.target.value) }} disabled={voices.length === 0 && piperVoices.length === 0}>
+          {voices.length === 0 && piperVoices.length === 0 && <option value="">Nincs magyar hang</option>}
+          {piperVoices.length > 0 && <optgroup label="Helyi (Piper)">
+            {piperVoices.map(id => <option key={id} value={PIPER + id}>{piperLabel(id)}</option>)}
+          </optgroup>}
+          {voices.length > 0 && <optgroup label="Rendszerhang">
+            {voices.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+          </optgroup>}
         </select>
         <select aria-label="Felolvasás sebessége" className="rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground" value={rate}
           onChange={e => { const r = Number(e.target.value); setRate(r); writePref(RATE_KEY, String(r)) }}>
           {RATES.map(r => <option key={r} value={r}>{String(r).replace('.', ',')}×</option>)}
         </select>
-        {turns.length > 0 && <Button variant="ghost" size="xs" onClick={() => { setTurns([]); window.speechSynthesis?.cancel() }}>Új beszélgetés</Button>}
+        {turns.length > 0 && <Button variant="ghost" size="xs" onClick={() => { setTurns([]); stopSpeaking() }}>Új beszélgetés</Button>}
       </div>
 
       <div className="flex flex-col items-center gap-2 py-4">
@@ -196,7 +253,7 @@ export function HangPanel() {
           <div key={i} className={`rounded-lg px-3 py-2 text-sm border ${t.ki === 'en' ? 'border-border bg-secondary ml-12' : 'border-primary/40 bg-card mr-12'}`}>
             <div className="text-xs text-muted-foreground mb-1 flex items-center gap-2">
               {t.ki === 'en' ? 'Te' : 'Hang-asszisztens'}
-              {t.ki === 'agens' && <button type="button" className="text-primary underline" onClick={() => say(t.szoveg)}>Felolvasás újra</button>}
+              {t.ki === 'agens' && <button type="button" className="text-primary underline" onClick={() => void say(t.szoveg)}>Felolvasás újra</button>}
             </div>
             <div className="text-foreground whitespace-pre-wrap break-words">{t.szoveg}</div>
           </div>

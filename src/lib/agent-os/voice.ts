@@ -1,9 +1,12 @@
 /**
- * Agent OS voice (fork addition): speech-to-text through a local whisper.cpp server and one-shot
- * questions to the voice agent through the Agent OS runner (agents/runner/ask-agent.mjs).
+ * Agent OS voice (fork addition): speech-to-text through a local whisper.cpp server, text-to-speech
+ * through a local Piper server, and one-shot questions to the voice agent through the Agent OS runner
+ * (agents/runner/ask-agent.mjs).
  *
  * Env:
  *   AOS_WHISPER_URL   whisper-server /inference endpoint (default http://127.0.0.1:8178/inference)
+ *   AOS_PIPER_URL     Piper HTTP server base URL (default http://127.0.0.1:8179)
+ *   AOS_PIPER_VOICES  voices offered in the Hang tab (default the three Hungarian medium voices)
  *   AOS_RUNNER_DIR    directory of ask-agent.mjs (default ~/agent-os/os/agents/runner)
  *   AOS_VOICE_AGENT   agent profile used for voice (default hang-asszisztens)
  *   AOS_HOME, AOS_AGENT_KEYS are passed through to the runner.
@@ -38,6 +41,44 @@ export async function transcribe(audio: Blob): Promise<string> {
   if (!res.ok) throw new VoiceError(`Speech recognition failed (HTTP ${res.status})`, 502)
   const json = await res.json().catch(() => ({})) as { text?: string }
   return (json.text || '').replace(/\s+/g, ' ').trim()
+}
+
+const PIPER_URL = (process.env.AOS_PIPER_URL || 'http://127.0.0.1:8179').replace(/\/+$/, '')
+const PIPER_VOICES = (process.env.AOS_PIPER_VOICES || 'hu_HU-anna-medium,hu_HU-imre-medium,hu_HU-berta-medium')
+  .split(',').map(s => s.trim()).filter(v => /^[a-z]{2}_[A-Z]{2}-[a-z0-9_]+-(x_low|low|medium|high)$/.test(v))
+export const MAX_SPEAK_CHARS = 2000
+
+// Configured voices that the Piper server actually has; [] when the server is not running.
+export async function piperVoices(): Promise<string[]> {
+  try {
+    const res = await fetch(`${PIPER_URL}/voices`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return []
+    const available = Object.keys(await res.json() as Record<string, unknown>)
+    return PIPER_VOICES.filter(v => available.includes(v))
+  } catch {
+    return []
+  }
+}
+
+// Returns a WAV file. rate 1 = normal speed (Piper's length_scale is the inverse).
+export async function synthesize(text: string, voice: string, rate: number): Promise<ArrayBuffer> {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean || clean.length > MAX_SPEAK_CHARS) throw new VoiceError('Empty or too long text', 400)
+  if (!PIPER_VOICES.includes(voice)) throw new VoiceError('Unknown voice', 400)
+  if (!Number.isFinite(rate) || rate < 0.5 || rate > 2.5) throw new VoiceError('Invalid speed', 400)
+  let res: Response
+  try {
+    res = await fetch(`${PIPER_URL}/synthesize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ text: clean, voice, length_scale: Number((1 / rate).toFixed(3)) }),
+      signal: AbortSignal.timeout(60_000),
+    })
+  } catch {
+    throw new VoiceError('Speech synthesis server is not reachable', 503)
+  }
+  if (!res.ok) throw new VoiceError(`Speech synthesis failed (HTTP ${res.status})`, 502)
+  return res.arrayBuffer()
 }
 
 export interface Turn { ki: 'en' | 'agens'; szoveg: string }
