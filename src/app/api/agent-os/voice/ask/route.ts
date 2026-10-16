@@ -1,0 +1,36 @@
+/**
+ * Agent OS voice – ask the voice agent (fork addition).
+ *   POST {kerdes, elozmeny?: [{ki:'en'|'agens', szoveg}]}  admin → { valasz }
+ * Admin only: the spoken request of the logged-in owner counts as approval for the voice agent's
+ * limited tools (see agents/hang-asszisztens.md in the Agent OS repo).
+ */
+import { NextRequest, NextResponse } from 'next/server'
+import { requireRole } from '@/lib/auth'
+import { VoiceError, askAgent, type Turn } from '@/lib/agent-os/voice'
+
+let busy = false // one voice question at a time (each spawns a Claude Code session)
+
+export async function POST(request: NextRequest) {
+  const auth = requireRole(request, 'admin')
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
+  if (auth.user.agent_name) return NextResponse.json({ error: 'Agents may not use the voice agent' }, { status: 403 })
+  if (busy) return NextResponse.json({ error: 'A previous question is still running' }, { status: 429 })
+
+  const body = await request.json().catch(() => null) as { kerdes?: unknown; elozmeny?: unknown } | null
+  const kerdes = typeof body?.kerdes === 'string' ? body.kerdes.trim() : ''
+  if (!kerdes || kerdes.length > 2000) return NextResponse.json({ error: 'Empty or too long question' }, { status: 400 })
+  const elozmeny: Turn[] = (Array.isArray(body?.elozmeny) ? body.elozmeny : [])
+    .filter((t: any) => t && (t.ki === 'en' || t.ki === 'agens') && typeof t.szoveg === 'string')
+    .slice(-6)
+    .map((t: any) => ({ ki: t.ki, szoveg: t.szoveg.slice(0, 500) }))
+
+  busy = true
+  try {
+    return NextResponse.json({ valasz: await askAgent(kerdes, elozmeny) })
+  } catch (err) {
+    if (err instanceof VoiceError) return NextResponse.json({ error: err.message }, { status: err.status })
+    return NextResponse.json({ error: 'Voice request failed' }, { status: 500 })
+  } finally {
+    busy = false
+  }
+}

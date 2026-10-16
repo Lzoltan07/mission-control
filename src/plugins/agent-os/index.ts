@@ -5,8 +5,13 @@
  */
 import { registerNavItems, registerPanel, getPluginPanel } from '@/lib/plugins'
 import { HetiTervPanel } from './heti-terv-panel'
+import { HangPanel } from './hang-panel'
 
 if (!getPluginPanel('heti-terv')) {
-  registerNavItems([{ id: 'heti-terv', label: 'Heti terv', icon: '📅', groupId: 'core' }])
+  registerNavItems([
+    { id: 'heti-terv', label: 'Heti terv', icon: '📅', groupId: 'core' },
+    { id: 'hang', label: 'Hang', icon: '🎙️', groupId: 'core' },
+  ])
   registerPanel('heti-terv', HetiTervPanel)
+  registerPanel('hang', HangPanel)
 }
