@@ -65,3 +65,24 @@ export interface AgentWatch {
   lastActivity: { at: string; text: string } | null
   keyExpires: string | null
 }
+
+export interface RuntimeWatch {
+  id: 'claude' | 'codex' | 'openclaw' | 'hermes'
+  name: string
+  installed: boolean
+  version: string | null
+  running: boolean
+  authenticated: boolean
+  activeSessions: number
+  sessionsToday: number
+  /** total tokens of the sessions active today (whole sessions, not only today's part) */
+  tokensToday: number
+  costToday: number | null
+  lastActivity: string | null
+  currentWork: string | null
+  agents: number
+  runningAgents: string[]
+  openTasks: number
+  doneTasks: number
+  note: string | null
+}

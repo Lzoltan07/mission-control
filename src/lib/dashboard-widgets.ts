@@ -158,7 +158,7 @@ export const WIDGET_CATALOG: DashboardWidget[] = [
   {
     id: 'aos-agent-watch',
     label: 'Ágensfigyelő',
-    description: 'Négy kiválasztott ágens munkája és haladása egyszerre',
+    description: 'Claude, Codex, OpenClaw és Hermes állapota, plusz választható ágensek',
     category: 'sessions',
     modes: ['local', 'full'],
     defaultSize: 'full',

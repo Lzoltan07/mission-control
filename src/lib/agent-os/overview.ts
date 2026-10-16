@@ -8,7 +8,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { getDatabase } from '@/lib/db'
 import { calendarProvider } from '@/lib/agent-os/calendar'
-import { FUNCTIONS, type AgentWatch, type FunctionStatus } from '@/lib/agent-os/functions-catalog'
+import { FUNCTIONS, type AgentWatch, type FunctionStatus, type RuntimeWatch } from '@/lib/agent-os/functions-catalog'
+import { detectRuntime } from '@/lib/agent-runtimes'
+import { scanCodexSessions } from '@/lib/codex-sessions'
+import { scanHermesSessions } from '@/lib/hermes-sessions'
+import { getAllGatewaySessions } from '@/lib/sessions'
 
 const AOS_HOME = process.env.AOS_HOME || path.join(os.homedir(), '.agent-os')
 const iso = (unix: number | null | undefined) => (unix ? new Date(unix * 1000).toISOString() : undefined)
@@ -202,6 +206,72 @@ export function agentWatch(workspaceId: number, names: string[]): AgentWatch[] {
       total: Number(counts.total || 0),
       lastActivity: last.t ? { at: iso(last.t)!, text: String(last.d || '') } : null,
       keyExpires: iso(key.e) ?? null,
+    }
+  })
+}
+
+// --- Runtimes: Claude Code, Codex, OpenClaw, Hermes (the four primary slots of the Ágensfigyelő) ---------
+const RUNTIME_NAMES: Record<RuntimeWatch['id'], string> = { claude: 'Claude Code', codex: 'Codex', openclaw: 'OpenClaw', hermes: 'Hermes' }
+const RUNTIME_PHASE: Record<RuntimeWatch['id'], string | null> = { claude: null, codex: '5. fázis', openclaw: '4. fázis', hermes: '5. fázis' }
+
+interface SessionLike { active: boolean; last: number; tokens: number; cost: number | null; label: string | null }
+
+function sessionsOf(id: RuntimeWatch['id']): SessionLike[] {
+  try {
+    if (id === 'claude') {
+      return all('SELECT is_active, last_message_at, input_tokens, output_tokens, estimated_cost, project_slug FROM claude_sessions ORDER BY last_message_at DESC LIMIT 200')
+        .map(r => ({ active: !!r.is_active, last: r.last_message_at ? new Date(r.last_message_at).getTime() : 0, tokens: Number(r.input_tokens || 0) + Number(r.output_tokens || 0), cost: Number(r.estimated_cost || 0), label: r.project_slug ? String(r.project_slug).split('-').filter(Boolean).slice(-2).join('-') : null }))
+    }
+    if (id === 'codex') {
+      return scanCodexSessions(100).map(s => ({ active: s.isActive, last: s.lastMessageAt ? new Date(s.lastMessageAt).getTime() : 0, tokens: s.totalTokens || 0, cost: null, label: s.projectSlug || null }))
+    }
+    if (id === 'hermes') {
+      return scanHermesSessions(100).map(s => ({ active: s.isActive, last: s.lastMessageAt ? new Date(s.lastMessageAt).getTime() : 0, tokens: s.inputTokens + s.outputTokens, cost: null, label: s.title || null }))
+    }
+    return getAllGatewaySessions().map(s => ({ active: s.active, last: s.updatedAt, tokens: s.totalTokens || 0, cost: null, label: s.agent || null }))
+  } catch {
+    return []
+  }
+}
+
+export function runtimeWatch(workspaceId: number): RuntimeWatch[] {
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0)
+  const today = startOfDay.getTime()
+  // Agent OS agents by runtime: config.runtime / runtime_type; agents without one are Claude Code subagents.
+  const agents = all("SELECT name, COALESCE(runtime_type, json_extract(config, '$.runtime')) rt FROM agents WHERE workspace_id = ? AND hidden = 0", workspaceId)
+  const runtimeOf = (rt: string | null): RuntimeWatch['id'] => {
+    const v = (rt || 'claude').toLowerCase()
+    return v.includes('codex') ? 'codex' : v.includes('hermes') ? 'hermes' : v.includes('openclaw') || v.includes('gateway') ? 'openclaw' : 'claude'
+  }
+  const ids: RuntimeWatch['id'][] = ['claude', 'codex', 'openclaw', 'hermes']
+  return ids.map(id => {
+    let rt: { installed: boolean; version: string | null; running: boolean; authenticated: boolean }
+    try { rt = detectRuntime(id) } catch { rt = { installed: false, version: null, running: false, authenticated: false } }
+    const sessions = sessionsOf(id)
+    const todays = sessions.filter(s => s.last >= today)
+    const active = sessions.filter(s => s.active)
+    const last = sessions.reduce((m, s) => Math.max(m, s.last), 0)
+    const mine = agents.filter(a => runtimeOf(a.rt) === id).map(a => a.name)
+    const running = mine.filter(isRunning)
+    const placeholders = mine.map(() => '?').join(',')
+    const tasks = mine.length
+      ? one(`SELECT SUM(status NOT IN ('done','failed')) open, SUM(status = 'done') done FROM tasks WHERE workspace_id = ? AND assigned_to IN (${placeholders})`, workspaceId, ...mine)
+      : {}
+    const current = running.length
+      ? one(`SELECT id, title FROM tasks WHERE workspace_id = ? AND assigned_to IN (${running.map(() => '?').join(',')}) AND status IN ('assigned','in_progress') ORDER BY updated_at DESC LIMIT 1`, workspaceId, ...running)
+      : {}
+    const costs = todays.map(s => s.cost).filter((c): c is number => c !== null)
+    return {
+      id, name: RUNTIME_NAMES[id], installed: rt.installed, version: rt.version, running: rt.running || active.length > 0 || running.length > 0,
+      authenticated: rt.authenticated,
+      activeSessions: active.length, sessionsToday: todays.length,
+      tokensToday: todays.reduce((n, s) => n + s.tokens, 0),
+      costToday: costs.length ? costs.reduce((a, b) => a + b, 0) : null,
+      lastActivity: last ? new Date(last).toISOString() : null,
+      currentWork: current.id ? `#${current.id} ${current.title}` : active[0]?.label ? `Munkamenet: ${active[0].label}` : null,
+      agents: mine.length, runningAgents: running,
+      openTasks: Number(tasks.open || 0), doneTasks: Number(tasks.done || 0),
+      note: rt.installed ? null : RUNTIME_PHASE[id] ? `Még nincs telepítve (${RUNTIME_PHASE[id]})` : 'Nincs telepítve',
     }
   })
 }
