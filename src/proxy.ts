@@ -197,7 +197,12 @@ export function proxy(request: NextRequest) {
   const isPublicHealthProbe = pathname === '/api/status' && request.nextUrl.searchParams.get('action') === 'health'
   // Exact-match only (no prefix/wildcard) so this exempts just the two health routes.
   const isPublicHealthRoute = pathname === '/api/health' || pathname === '/health'
-  if (pathname === '/login' || pathname === '/setup' || pathname.startsWith('/api/auth/') || pathname === '/api/setup' || pathname === '/api/docs' || pathname === '/docs' || isPublicHealthProbe || isPublicHealthRoute) {
+  // Agent OS fork: Google's OAuth redirect back to us is a cross-site navigation, so the
+  // SameSite=strict session cookie is not sent. That route authenticates the callback with its
+  // one-time state cookie (issued only to an admin at ?action=start) instead.
+  const isAgentOsOAuthCallback = pathname === '/api/agent-os/calendar/oauth'
+    && request.method === 'GET' && request.nextUrl.searchParams.has('state') && !request.nextUrl.searchParams.has('action')
+  if (pathname === '/login' || pathname === '/setup' || pathname.startsWith('/api/auth/') || pathname === '/api/setup' || pathname === '/api/docs' || pathname === '/docs' || isPublicHealthProbe || isPublicHealthRoute || isAgentOsOAuthCallback) {
     const { response, nonce } = nextResponseWithNonce(request)
     return addSecurityHeaders(response, request, nonce)
   }
