@@ -18,7 +18,11 @@ import { config } from '@/lib/config'
 
 export const CALENDAR_NAME = 'Agent OS – heti terv'
 export const TIMEZONE = process.env.AOS_TIMEZONE || 'Europe/Budapest'
+// openid + email only identify which Google account consented, so the callback can reject any
+// account other than AOS_GCAL_ALLOWED_EMAIL (the app is in production, but single-user).
 const GOOGLE_SCOPES = [
+  'openid',
+  'email',
   'https://www.googleapis.com/auth/calendar.app.created',
   'https://www.googleapis.com/auth/calendar.freebusy',
 ]
@@ -183,9 +187,45 @@ export async function googleExchangeCode(code: string, redirectUri: string): Pro
   })
   const json = await res.json()
   if (!res.ok || !json.refresh_token) throw new CalendarError(`Google token exchange failed: ${json.error || res.status}`, 502)
+
+  // Single-user lock: only the configured Google account may connect. The id_token comes straight
+  // from Google's token endpoint over TLS, so its claims can be trusted without a signature check.
+  const allowed = (process.env.AOS_GCAL_ALLOWED_EMAIL || '').trim().toLowerCase()
+  if (!allowed) {
+    await revokeGoogleToken(json.refresh_token)
+    throw new CalendarError('AOS_GCAL_ALLOWED_EMAIL is not set; refusing to connect', 500)
+  }
+  const claims = decodeJwtPayload(json.id_token)
+  const email = String(claims.email || '').toLowerCase()
+  if (!claims.email_verified || email !== allowed) {
+    await revokeGoogleToken(json.refresh_token)
+    throw new CalendarError('This Google account is not allowed to connect to Agent OS', 403)
+  }
+
   writeGoogle({ ...readGoogle(), refresh_token: json.refresh_token })
   cachedToken = { value: json.access_token, expires: Date.now() + (json.expires_in - 60) * 1000 }
   await ensureGoogleCalendar()
+}
+
+function decodeJwtPayload(jwt: unknown): Record<string, unknown> {
+  if (typeof jwt !== 'string' || jwt.split('.').length !== 3) return {}
+  try {
+    return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'))
+  } catch {
+    return {}
+  }
+}
+
+async function revokeGoogleToken(token: string): Promise<void> {
+  try {
+    await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }),
+    })
+  } catch {
+    // best effort: the token is never stored either way
+  }
 }
 
 async function accessToken(): Promise<string> {
