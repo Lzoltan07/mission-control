@@ -5,6 +5,8 @@
  *
  * Env:
  *   AOS_WHISPER_URL   whisper-server /inference endpoint (default http://127.0.0.1:8178/inference)
+ *   AOS_WAKE_URL      small, fast whisper-server for wake-word checks (default http://127.0.0.1:8177/inference)
+ *   AOS_WAKE_WORDS    accepted spellings of the wake word (default: Jarvis and its Hungarian transcriptions)
  *   AOS_PIPER_URL     Piper HTTP server base URL (default http://127.0.0.1:8179)
  *   AOS_PIPER_VOICES  voices offered in the Hang tab (default the three Hungarian medium voices)
  *   AOS_RUNNER_DIR    directory of ask-agent.mjs (default ~/agent-os/os/agents/runner)
@@ -24,7 +26,7 @@ const WHISPER_URL = process.env.AOS_WHISPER_URL || 'http://127.0.0.1:8178/infere
 const RUNNER_DIR = process.env.AOS_RUNNER_DIR || path.join(os.homedir(), 'agent-os', 'os', 'agents', 'runner')
 const VOICE_AGENT = process.env.AOS_VOICE_AGENT || 'hang-asszisztens'
 
-export async function transcribe(audio: Blob): Promise<string> {
+export async function transcribe(audio: Blob, { url = WHISPER_URL, prompt = '' } = {}): Promise<string> {
   if (audio.size === 0) throw new VoiceError('Empty recording', 400)
   if (audio.size > MAX_AUDIO_BYTES) throw new VoiceError('Recording too long', 413)
   const form = new FormData()
@@ -32,15 +34,60 @@ export async function transcribe(audio: Blob): Promise<string> {
   form.append('response_format', 'json')
   form.append('language', 'hu')
   form.append('temperature', '0')
+  if (prompt) form.append('prompt', prompt)
   let res: Response
   try {
-    res = await fetch(WHISPER_URL, { method: 'POST', body: form, signal: AbortSignal.timeout(180_000) })
+    res = await fetch(url, { method: 'POST', body: form, signal: AbortSignal.timeout(180_000) })
   } catch {
     throw new VoiceError('Speech recognition server is not reachable', 503)
   }
   if (!res.ok) throw new VoiceError(`Speech recognition failed (HTTP ${res.status})`, 502)
   const json = await res.json().catch(() => ({})) as { text?: string }
   return (json.text || '').replace(/\s+/g, ' ').trim()
+}
+
+// --- Wake word ---------------------------------------------------------------------------------------
+const WAKE_URL = process.env.AOS_WAKE_URL || 'http://127.0.0.1:8177/inference'
+export const MAX_WAKE_BYTES = 20 * 16000 * 2 + 44 // 20 s of 16 kHz mono PCM
+const fold = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+const WAKE_WORDS = (process.env.AOS_WAKE_WORDS || 'jarvis').split(',').map(fold).filter(Boolean)
+
+// Spelling-tolerant: whisper writes "Jarvis" as Jarrvis, Dzsárvisz, Jarvisz, Gyarvis... in Hungarian.
+const canon = (w: string) => w.replace(/^(dzs|dz|gy|dj|zs)/, 'j').replace(/sz/g, 's').replace(/y/g, 'i').replace(/(.)\1+/g, '$1')
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  }
+  return d[a.length][b.length]
+}
+const isWakeWord = (word: string) => WAKE_WORDS.some(w => distance(canon(word), canon(w)) <= 1)
+
+export interface WakeResult { wake: boolean; text: string }
+
+// Initial prompt: biases whisper towards the wake word. Keep it short: long prompts make the small
+// model drop the start of the segment (the wake word itself).
+const WAKE_PROMPT = 'Jarvis, heti terv'
+
+// Checks a speech segment for the wake word with the small model. Only when it starts with the wake
+// word (within the first three words) is the segment transcribed again with the large model; anything
+// else is dropped here, so background talk never reaches the agent. text = the command after the wake
+// word ('' when only the wake word was said). When AOS_WAKE_URL and AOS_WHISPER_URL point to the same
+// server (a machine without room for two models), its first transcript is reused.
+export async function detectWake(audio: Blob): Promise<WakeResult> {
+  if (audio.size > MAX_WAKE_BYTES) throw new VoiceError('Segment too long', 413)
+  const raw = await transcribe(audio, { url: WAKE_URL, prompt: WAKE_PROMPT })
+  const words = fold(raw).split(' ').filter(Boolean)
+  const at = words.slice(0, 3).findIndex(isWakeWord)
+  if (at < 0) return { wake: false, text: '' }
+  if (words.length - at - 1 < 2) return { wake: true, text: '' }
+  const full = WAKE_URL === WHISPER_URL ? raw : await transcribe(audio, { prompt: WAKE_PROMPT })
+  // Drop the wake word and what precedes it from the accurate transcript.
+  const tokens = full.split(' ')
+  const cut = tokens.slice(0, 4).findIndex(w => isWakeWord(fold(w)))
+  const text = (cut >= 0 ? tokens.slice(cut + 1) : tokens).join(' ').replace(/^[\s,.!?:;–-]+/, '').trim()
+  return { wake: true, text }
 }
 
 const PIPER_URL = (process.env.AOS_PIPER_URL || 'http://127.0.0.1:8179').replace(/\/+$/, '')
