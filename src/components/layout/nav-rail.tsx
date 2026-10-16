@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/lib/version'
 import { getPluginNavItems } from '@/lib/plugins'
-import '@/plugins/agent-os' // Agent OS fork: registers the "Heti terv" tab
+import { useKeepScroll } from '@/plugins/agent-os' // Agent OS fork: registers our tabs; keeps the sidebar scroll
 import { apiFetch } from '@/lib/api-client'
 
 interface NavItem {
@@ -130,6 +130,7 @@ const adminOnlyPanels = new Set<string>([])
 export function NavRail() {
   const { activeTab, connection, dashboardMode, currentUser, activeTenant, tenants, osUsers, setActiveTenant, fetchTenants, fetchOsUsers, activeProject, projects, setActiveProject, fetchProjects, sidebarExpanded, collapsedGroups, toggleSidebar, toggleGroup, defaultOrgName, interfaceMode, setInterfaceMode } = useMissionControl()
   const navigateToPanel = useNavigateToPanel()
+  const navScrollRef = useKeepScroll('aos-nav-scroll') // Agent OS fork
   const prefetchPanel = usePrefetchPanel()
   const tn = useTranslations('nav')
   const tc = useTranslations('common')
@@ -278,7 +279,7 @@ export function NavRail() {
         </div>
 
         {/* Nav groups */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
+        <div ref={navScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1">
           {filteredGroups.map((group, groupIndex) => (
             <div key={group.id}>
               {/* Divider between groups (not before first) */}

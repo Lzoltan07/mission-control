@@ -144,10 +144,21 @@ export const WIDGET_CATALOG: DashboardWidget[] = [
     defaultSize: 'full',
     component: 'QuickActionsWidget',
   },
+  // Agent OS fork: four chosen agents side by side (src/plugins/agent-os/agent-watch-widget.tsx)
+  {
+    id: 'aos-agent-watch',
+    label: 'Ágensfigyelő',
+    description: 'Négy kiválasztott ágens munkája és haladása egyszerre',
+    category: 'sessions',
+    modes: ['local', 'full'],
+    defaultSize: 'full',
+    component: 'AgentWatchWidget',
+  },
 ]
 
 export const LOCAL_DEFAULT_LAYOUT = [
   'briefing-bar',
+  'aos-agent-watch',
   'activity-timeline',
   'fleet-status',
   'task-pipeline',
@@ -157,6 +168,7 @@ export const LOCAL_DEFAULT_LAYOUT = [
 
 export const GATEWAY_DEFAULT_LAYOUT = [
   'briefing-bar',
+  'aos-agent-watch',
   'activity-timeline',
   'fleet-status',
   'task-pipeline',

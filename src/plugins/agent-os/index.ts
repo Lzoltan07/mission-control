@@ -6,10 +6,16 @@
  */
 import { registerNavItems, registerPanel, getPluginPanel } from '@/lib/plugins'
 import { HetiTervPanel } from './heti-terv-panel'
+import { FunkciokPanel } from './funkciok-panel'
 
 export { VoiceAssistant } from './voice-assistant'
 
 if (!getPluginPanel('heti-terv')) {
-  registerNavItems([{ id: 'heti-terv', label: 'Heti terv', icon: '📅', groupId: 'core' }])
+  registerNavItems([
+    { id: 'funkciok', label: 'Funkciók', icon: '🧭', groupId: 'core' },
+    { id: 'heti-terv', label: 'Heti terv', icon: '📅', groupId: 'core' },
+  ])
+  registerPanel('funkciok', FunkciokPanel)
   registerPanel('heti-terv', HetiTervPanel)
 }
+export { useKeepScroll } from './keep-scroll'
