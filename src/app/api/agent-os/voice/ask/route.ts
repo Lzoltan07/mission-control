@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
 import { VoiceError, askAgent, type Turn } from '@/lib/agent-os/voice'
+import { startExecution, touchDevice, updateExecution, validDeviceId } from '@/lib/agent-os/executions'
 
 let busy = false // one voice question at a time (each spawns a Claude Code session)
 
@@ -25,9 +26,19 @@ export async function POST(request: NextRequest) {
     .map((t: any) => ({ ki: t.ki, szoveg: t.szoveg.slice(0, 500) }))
 
   busy = true
+  // Execution log: which device asked (x-aos-device from the voice button), who answers where.
+  const device = request.headers.get('x-aos-device')
+  if (validDeviceId(device)) touchDevice(auth.user.workspace_id, auth.user.username, device, null, request.headers.get('user-agent'))
+  const run = startExecution({
+    workspaceId: auth.user.workspace_id, kind: 'hang', title: kerdes, agent: process.env.AOS_VOICE_AGENT || 'hang-asszisztens',
+    sourceUser: auth.user.username, sourceDeviceId: validDeviceId(device) ? device : null, progress: 'Az ágens gondolkodik',
+  })
   try {
-    return NextResponse.json({ valasz: await askAgent(kerdes, elozmeny) })
+    const valasz = await askAgent(kerdes, elozmeny)
+    updateExecution(run, auth.user.workspace_id, { status: 'done', progress: valasz.slice(0, 200) })
+    return NextResponse.json({ valasz })
   } catch (err) {
+    updateExecution(run, auth.user.workspace_id, { status: 'failed', progress: err instanceof Error ? err.message : 'Hiba' })
     if (err instanceof VoiceError) return NextResponse.json({ error: err.message }, { status: err.status })
     return NextResponse.json({ error: 'Voice request failed' }, { status: 500 })
   } finally {

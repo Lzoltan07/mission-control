@@ -22,6 +22,7 @@ import { FleetStatusWidget } from './widgets/fleet-status-widget'
 import { TaskPipelineWidget } from './widgets/task-pipeline-widget'
 import { SystemHealthWidget } from './widgets/system-health-widget'
 import { AgentWatchWidget } from '@/plugins/agent-os/agent-watch-widget' // Agent OS fork
+import { JarvisHubWidget } from '@/plugins/agent-os/jarvis-hub-widget' // Agent OS fork
 
 const WIDGET_COMPONENTS: Record<string, React.ComponentType<{ data: DashboardData }>> = {
   'briefing-bar': BriefingBarWidget,
@@ -40,6 +41,7 @@ const WIDGET_COMPONENTS: Record<string, React.ComponentType<{ data: DashboardDat
   'maintenance': MaintenanceWidget,
   'quick-actions': QuickActionsWidget,
   'aos-agent-watch': AgentWatchWidget,
+  'aos-jarvis-hub': JarvisHubWidget,
 }
 
 // Map widget defaultSize to CSS grid column spans

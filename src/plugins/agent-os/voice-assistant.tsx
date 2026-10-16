@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
+import { deviceId } from './device'
 
 interface Turn { ki: 'en' | 'agens'; szoveg: string }
 type Phase = 'off' | 'starting' | 'needs-click' | 'listening' | 'armed' | 'checking' | 'thinking' | 'speaking' | 'error'
@@ -108,7 +109,12 @@ export function VoiceAssistant() {
   const speakSeq = useRef(0)
   const handleSegment = useRef<(wav: Blob) => void>(() => {})
 
-  const setP = useCallback((p: Phase) => { phaseRef.current = p; setPhase(p) }, [])
+  // The phase is also broadcast (window event 'aos-jarvis-phase') for the Jarvis core on the dashboard.
+  const setP = useCallback((p: Phase) => {
+    phaseRef.current = p
+    setPhase(p)
+    window.dispatchEvent(new CustomEvent('aos-jarvis-phase', { detail: p }))
+  }, [])
   useEffect(() => { turnsRef.current = turns }, [turns])
 
   // --- Preferences and voices ---------------------------------------------------------------------
@@ -215,7 +221,7 @@ export function VoiceAssistant() {
     setP('thinking')
     try {
       const { valasz } = await apiFetch<{ valasz: string }>('/api/agent-os/voice/ask', {
-        method: 'POST', body: JSON.stringify({ kerdes, elozmeny: history }),
+        method: 'POST', body: JSON.stringify({ kerdes, elozmeny: history }), headers: { 'x-aos-device': deviceId() },
       })
       setTurns(t => [...t, { ki: 'agens' as const, szoveg: valasz }].slice(-12))
       setP('speaking')
@@ -345,6 +351,17 @@ export function VoiceAssistant() {
     armedUntil.current = Date.now() + ARMED_MS
     setP('armed')
   }
+
+  // The Jarvis core can ask for the current phase ('aos-jarvis-hello') and start a command ('aos-jarvis-talk').
+  const talkRef = useRef(talkNow)
+  talkRef.current = talkNow
+  useEffect(() => {
+    const hello = () => window.dispatchEvent(new CustomEvent('aos-jarvis-phase', { detail: phaseRef.current }))
+    const talk = () => talkRef.current()
+    window.addEventListener('aos-jarvis-hello', hello)
+    window.addEventListener('aos-jarvis-talk', talk)
+    return () => { window.removeEventListener('aos-jarvis-hello', hello); window.removeEventListener('aos-jarvis-talk', talk) }
+  }, [])
 
   const busy = phase === 'checking' || phase === 'thinking' || phase === 'speaking'
   const dot = {

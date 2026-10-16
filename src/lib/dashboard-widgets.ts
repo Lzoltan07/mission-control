@@ -144,6 +144,16 @@ export const WIDGET_CATALOG: DashboardWidget[] = [
     defaultSize: 'full',
     component: 'QuickActionsWidget',
   },
+  // Agent OS fork: animated Jarvis core with the key functions around it (src/plugins/agent-os/jarvis-hub-widget.tsx)
+  {
+    id: 'aos-jarvis-hub',
+    label: 'Jarvis',
+    description: 'A hangasszisztens animált magja, körülötte a legfontosabb funkciók állapota',
+    category: 'metrics',
+    modes: ['local', 'full'],
+    defaultSize: 'full',
+    component: 'JarvisHubWidget',
+  },
   // Agent OS fork: four chosen agents side by side (src/plugins/agent-os/agent-watch-widget.tsx)
   {
     id: 'aos-agent-watch',
@@ -157,6 +167,7 @@ export const WIDGET_CATALOG: DashboardWidget[] = [
 ]
 
 export const LOCAL_DEFAULT_LAYOUT = [
+  'aos-jarvis-hub',
   'briefing-bar',
   'aos-agent-watch',
   'activity-timeline',
@@ -167,6 +178,7 @@ export const LOCAL_DEFAULT_LAYOUT = [
 ]
 
 export const GATEWAY_DEFAULT_LAYOUT = [
+  'aos-jarvis-hub',
   'briefing-bar',
   'aos-agent-watch',
   'activity-timeline',

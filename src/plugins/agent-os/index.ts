@@ -9,6 +9,8 @@ import { HetiTervPanel } from './heti-terv-panel'
 import { FunkciokPanel } from './funkciok-panel'
 
 export { VoiceAssistant } from './voice-assistant'
+export { ExecutionLog } from './execution-log'
+export { DeviceBeacon } from './device'
 
 if (!getPluginPanel('heti-terv')) {
   registerNavItems([
