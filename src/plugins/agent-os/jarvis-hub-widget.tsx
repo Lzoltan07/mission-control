@@ -20,18 +20,18 @@ const PHASE_LOOK: Record<Phase, { color: string; label: string; speed: number }>
   starting: { color: '#facc15', label: 'Ébred…', speed: 1 },
   'needs-click': { color: '#facc15', label: 'Kattints bárhová', speed: 0.6 },
   listening: { color: '#22d3ee', label: 'Mondd: „Jarvis, …”', speed: 1 },
-  armed: { color: '#f43f5e', label: 'Hallgatlak…', speed: 2 },
+  armed: { color: '#7dd3fc', label: 'Hallgatlak…', speed: 2 },
   checking: { color: '#60a5fa', label: 'Feldolgozás…', speed: 2.5 },
   thinking: { color: '#a78bfa', label: 'Gondolkodom…', speed: 3 },
   speaking: { color: '#34d399', label: 'Beszélek…', speed: 1.8 },
-  error: { color: '#ef4444', label: 'A hang nem érhető el', speed: 0.4 },
+  error: { color: '#bae6fd', label: 'A hang nem érhető el', speed: 0.4 },
 }
 
 // Satellites: [function id, side]. Left column top→bottom, then right column top→bottom.
 const LEFT = ['tasks', 'agents', 'heti-terv']
 const RIGHT = ['hang', 'integrations', 'activity']
 const TITLE: Record<string, string> = { tasks: 'Feladatok', agents: 'Ágensek', 'heti-terv': 'Heti terv', hang: 'Hang', integrations: 'Integrációk', activity: 'Tevékenység' }
-const DOT: Record<FunctionStatus['state'], string> = { ok: 'bg-green-500', warn: 'bg-yellow-400', idle: 'bg-muted-foreground', off: 'bg-red-500/60' }
+const DOT: Record<FunctionStatus['state'], string> = { ok: 'bg-green-500', warn: 'bg-yellow-400', idle: 'bg-muted-foreground', off: 'bg-sky-300/60' }
 
 const CSS = `
 @keyframes aosSpin { to { transform: rotate(360deg) } }

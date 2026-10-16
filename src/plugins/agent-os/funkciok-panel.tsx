@@ -15,7 +15,7 @@ const STATE_STYLE: Record<FunctionStatus['state'], { dot: string; label: string 
   ok: { dot: 'bg-green-500', label: 'Működik' },
   warn: { dot: 'bg-yellow-400', label: 'Figyelmet kér' },
   idle: { dot: 'bg-muted-foreground', label: 'Nincs teendő' },
-  off: { dot: 'bg-red-500/60', label: 'Nem elérhető' },
+  off: { dot: 'bg-sky-300/60', label: 'Nem elérhető' },
 }
 
 export function relativeTime(isoTime?: string): string {

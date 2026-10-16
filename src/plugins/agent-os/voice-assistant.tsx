@@ -366,8 +366,8 @@ export function VoiceAssistant() {
   const busy = phase === 'checking' || phase === 'thinking' || phase === 'speaking'
   const dot = {
     off: 'bg-muted-foreground', starting: 'bg-yellow-400', 'needs-click': 'bg-yellow-400', listening: 'bg-green-500',
-    armed: 'bg-red-500 animate-pulse', checking: 'bg-blue-400 animate-pulse', thinking: 'bg-blue-400 animate-pulse',
-    speaking: 'bg-primary animate-pulse', error: 'bg-red-500',
+    armed: 'bg-sky-300 animate-pulse', checking: 'bg-blue-400 animate-pulse', thinking: 'bg-blue-400 animate-pulse',
+    speaking: 'bg-primary animate-pulse', error: 'bg-sky-300',
   }[phase]
   const last = turns.slice(-2)
 
