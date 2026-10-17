@@ -163,7 +163,7 @@ function writeGoogle(state: GoogleState) {
   fs.writeFileSync(googleFile(), JSON.stringify(state, null, 2), { mode: 0o600 })
 }
 
-function clientCreds() {
+export function clientCreds() {
   const id = process.env.AOS_GCAL_CLIENT_ID, secret = process.env.AOS_GCAL_CLIENT_SECRET
   if (!id || !secret) throw new CalendarError('AOS_GCAL_CLIENT_ID / AOS_GCAL_CLIENT_SECRET not set', 500)
   return { id, secret }
@@ -207,7 +207,7 @@ export async function googleExchangeCode(code: string, redirectUri: string): Pro
   await ensureGoogleCalendar()
 }
 
-function decodeJwtPayload(jwt: unknown): Record<string, unknown> {
+export function decodeJwtPayload(jwt: unknown): Record<string, unknown> {
   if (typeof jwt !== 'string' || jwt.split('.').length !== 3) return {}
   try {
     return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'))
@@ -216,7 +216,7 @@ function decodeJwtPayload(jwt: unknown): Record<string, unknown> {
   }
 }
 
-async function revokeGoogleToken(token: string): Promise<void> {
+export async function revokeGoogleToken(token: string): Promise<void> {
   try {
     await fetch('https://oauth2.googleapis.com/revoke', {
       method: 'POST',
