@@ -10,15 +10,24 @@
  *
  * Env: AOS_UNI_CALENDAR (default "családi"), AOS_UNI_MATCH (default "Tanóra"), AOS_UNI_SKIP
  *      (default "^Elmarad"), AOS_EXAM_MATCH (default "\\bZH\\b|Zárthelyi|Vizsga"), AOS_UNI_DAYS.
+ *      Moodle deadlines (moodle.ts) join the same run when AOS_MOODLE_ICS_URL is set; if Moodle cannot be
+ *      read, its existing blocks stay and the classes are still synced.
  */
 import { CalendarError, syncPlanBlocks, type SyncItem } from '@/lib/agent-os/calendar'
 import { listEventsRaw } from '@/lib/agent-os/google'
+import { fetchMoodleIcs, parseMoodleIcs } from '@/lib/agent-os/moodle'
 
 const UNI_CALENDAR = (process.env.AOS_UNI_CALENDAR || 'családi').toLowerCase()
 const MATCH = new RegExp(process.env.AOS_UNI_MATCH || 'Tanóra', 'i')
 const SKIP = new RegExp(process.env.AOS_UNI_SKIP || '^Elmarad', 'i')
 const EXAM = new RegExp(process.env.AOS_EXAM_MATCH || '\\bZH\\b|Zárthelyi|Vizsga', 'i')
 const DAYS = Math.min(Math.max(Number(process.env.AOS_UNI_DAYS) || 28, 1), 31)
+const MOODLE_SKIP = process.env.AOS_MOODLE_SKIP ? new RegExp(process.env.AOS_MOODLE_SKIP, 'i') : undefined
+const TZ = process.env.AOS_TIMEZONE || 'Europe/Budapest'
+
+const localDate = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+const localTime = (d: Date) => new Intl.DateTimeFormat('hu-HU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
+const pad = (n: number) => String(n).padStart(2, '0')
 
 /** "Kriminológia I. ( - 01) - dr. A;dr. B - Tanóra" → title "Kriminológia I. (01)", teachers "dr. A, dr. B". */
 export function shortenClass(raw: string): { title: string; teachers: string } {
@@ -30,7 +39,9 @@ export function shortenClass(raw: string): { title: string; teachers: string } {
   return { title: `🎓 ${name}${group ? ` (${group})` : ''}`, teachers }
 }
 
-export async function syncUniversity(): Promise<{ classes: number; exams: number; created: number; updated: number; removed: number }> {
+export interface UniSyncResult { classes: number; exams: number; moodle: number | null; moodleError?: string; created: number; updated: number; removed: number }
+
+export async function syncUniversity(): Promise<UniSyncResult> {
   if ((process.env.AOS_CALENDAR_PROVIDER || 'local') !== 'google') throw new CalendarError('The weekly plan is not on Google Calendar', 409)
   const from = new Date(); from.setHours(0, 0, 0, 0)
   const to = new Date(+from + DAYS * 86400_000)
@@ -54,7 +65,29 @@ export async function syncUniversity(): Promise<{ classes: number; exams: number
       exams++
     }
   }
-  const r = await syncPlanBlocks(items, from.toISOString(), to.toISOString())
-  return { classes, exams, ...r }
+  // Moodle deadlines: all-day markers on the due date, the due time in the title.
+  let moodle: number | null = null, moodleError: string | undefined
+  const keep: string[] = []
+  if (process.env.AOS_MOODLE_ICS_URL) {
+    try {
+      const due = parseMoodleIcs(await fetchMoodleIcs(process.env.AOS_MOODLE_ICS_URL), from, to, MOODLE_SKIP)
+      for (const d of due) {
+        const day = d.dateOnly ? `${d.due.getFullYear()}-${pad(d.due.getMonth() + 1)}-${pad(d.due.getDate())}` : localDate(d.due)
+        const next = new Date(`${day}T12:00:00Z`); next.setUTCDate(next.getUTCDate() + 1)
+        items.push({
+          syncId: `moodle:${d.uid}`, allDay: true, start: day, end: next.toISOString().slice(0, 10),
+          title: `⏰ ${d.dateOnly ? '' : `${localTime(d.due)} · `}${d.title}`.slice(0, 200),
+          description: [d.course ? `Kurzus: ${d.course}` : '', d.description, 'Forrás: Moodle, automatikus szinkron'].filter(Boolean).join('\n'),
+        })
+      }
+      moodle = due.length
+    } catch (err) {
+      // Never the URL in the message (fetchMoodleIcs only names the host).
+      moodleError = err instanceof Error ? err.message : 'Moodle could not be read'
+      keep.push('moodle:')
+    }
+  }
+  const r = await syncPlanBlocks(items, from.toISOString(), to.toISOString(), keep)
+  return { classes, exams, moodle, ...(moodleError ? { moodleError } : {}), ...r }
 }
 

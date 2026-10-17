@@ -323,8 +323,11 @@ const google = {
 
 export interface SyncItem { syncId: string; title: string; description: string; start: string; end: string; allDay: boolean }
 
-/** Makes the sync blocks in [from, to) match `items`: creates, updates, removes – own blocks only. */
-export async function syncPlanBlocks(items: SyncItem[], from: string, to: string) {
+/**
+ * Makes the sync blocks in [from, to) match `items`: creates, updates, removes – own blocks only.
+ * Blocks whose sync id starts with one of `keepPrefixes` are never removed (their source could not be read).
+ */
+export async function syncPlanBlocks(items: SyncItem[], from: string, to: string, keepPrefixes: string[] = []) {
   if (!readGoogle().refresh_token) throw new CalendarError('Google Calendar is not connected', 409)
   const calId = await ensureGoogleCalendar()
   const base = `/calendars/${encodeURIComponent(calId)}/events`
@@ -361,7 +364,8 @@ export async function syncPlanBlocks(items: SyncItem[], from: string, to: string
     }
   }
   for (const e of existing) {
-    if (!wanted.has(e.extendedProperties?.private?.aosSyncId)) { await gapi('DELETE', `${base}/${encodeURIComponent(e.id)}`); removed++ }
+    const sid: string = e.extendedProperties?.private?.aosSyncId || ''
+    if (!wanted.has(sid) && !keepPrefixes.some(p => sid.startsWith(p))) { await gapi('DELETE', `${base}/${encodeURIComponent(e.id)}`); removed++ }
   }
   return { created, updated, removed }
 }

@@ -106,8 +106,10 @@ export function HetiTervPanel() {
   const syncUni = async () => {
     setSyncing(true); setSyncInfo(null)
     try {
-      const r = await apiFetch<{ classes: number; exams: number; created: number; updated: number; removed: number }>('/api/agent-os/calendar/sync', { method: 'POST' })
-      setSyncInfo(`${r.classes} óra, ${r.exams} vizsga a következő 4 hétben · új: ${r.created}, frissítve: ${r.updated}, levéve: ${r.removed}`)
+      const r = await apiFetch<{ classes: number; exams: number; moodle: number | null; moodleError?: string; created: number; updated: number; removed: number }>('/api/agent-os/calendar/sync', { method: 'POST' })
+      const moodle = r.moodle === null ? '' : `, ${r.moodle} Moodle-határidő`
+      const moodleErr = r.moodleError ? ` · Moodle nem olvasható (${r.moodleError}), a meglévő határidők maradnak` : ''
+      setSyncInfo(`${r.classes} óra, ${r.exams} vizsga${moodle} a következő 4 hétben · új: ${r.created}, frissítve: ${r.updated}, levéve: ${r.removed}${moodleErr}`)
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'A szinkron nem sikerült')
@@ -147,7 +149,7 @@ export function HetiTervPanel() {
           )}
           <span>Szürke: foglalt idő a többi naptáradból (részletek nélkül).</span>
           {data.provider === 'google' && data.connected && (
-            <Button variant="ghost" size="xs" onClick={() => void syncUni()} disabled={syncing}>{syncing ? 'Órák frissítése…' : '🎓 Egyetemi órák frissítése'}</Button>
+            <Button variant="ghost" size="xs" onClick={() => void syncUni()} disabled={syncing}>{syncing ? 'Órák frissítése…' : '🎓 Órák és határidők frissítése'}</Button>
           )}
           {syncInfo && <span className="text-sky-300">{syncInfo}</span>}
         </div>
