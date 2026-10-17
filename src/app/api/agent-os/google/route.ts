@@ -20,7 +20,7 @@ import { requireRole, type User } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/db'
 import {
   GoogleError, calendarEvents, contactSearch, decideSend, driveRead, driveSave, driveSearch, gmailDraft, gmailRead, gmailSearch,
-  googleAgents, googleStatus, pendingRequests, requestSend, taskCreate, tasksList,
+  googleAgents, googleStatus, pendingRequests, requestSend, syncPendingWithGmail, taskCreate, tasksList,
 } from '@/lib/agent-os/google'
 
 function fail(err: unknown) {
@@ -51,12 +51,14 @@ export async function GET(request: NextRequest) {
       const auth = requireRole(request, 'viewer')
       if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
       if (auth.user.agent_name) return NextResponse.json({ error: 'People only' }, { status: 403 })
+      await syncPendingWithGmail()
       return NextResponse.json(googleStatus())
     }
     if (action === 'pending') {
       const auth = requireRole(request, 'operator')
       if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
       if (auth.user.agent_name && auth.user.agent_name !== 'ertesito') return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+      await syncPendingWithGmail()
       return NextResponse.json({ pending: pendingRequests().map(r => ({ id: r.id, subject: r.subject, requestedBy: r.requestedBy, requestedAt: r.requestedAt })) })
     }
     const who = toolUser(request)

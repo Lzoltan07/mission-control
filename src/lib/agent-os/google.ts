@@ -47,7 +47,7 @@ export interface SendRequest {
   hash: string
   requestedBy: string
   requestedAt: string
-  status: 'pending' | 'sent' | 'rejected' | 'failed'
+  status: 'pending' | 'sent' | 'rejected' | 'failed' | 'gone'
   decidedAt?: string
   note?: string
 }
@@ -247,6 +247,35 @@ export async function requestSend(draftId: string, requestedBy: string): Promise
 
 export function pendingRequests(): SendRequest[] {
   return (readState().requests || []).filter(r => r.status === 'pending')
+}
+
+/**
+ * Closes pending requests whose draft no longer exists: the owner sent or deleted it in Gmail itself.
+ * Otherwise they would stay "waiting" forever (and keep the notifier busy).
+ */
+export async function syncPendingWithGmail(): Promise<void> {
+  const pending = pendingRequests()
+  if (pending.length === 0 || !readState().refresh_token) return
+  // Compare with the current draft list (a sent draft's id stops resolving, but not always with 404).
+  const existing = new Set<string>()
+  let pageToken = ''
+  try {
+    for (let page = 0; page < 10; page++) {
+      const r = await getJson(`${GMAIL}/drafts?${new URLSearchParams({ maxResults: '500', ...(pageToken ? { pageToken } : {}) })}`)
+      for (const d of r.drafts || []) existing.add(d.id)
+      if (!r.nextPageToken) break
+      pageToken = r.nextPageToken
+    }
+  } catch {
+    return // Gmail not reachable now: leave the requests as they are
+  }
+  const gone = new Set(pending.filter(r => !existing.has(r.draftId)).map(r => r.id))
+  if (gone.size === 0) return
+  const st = readState()
+  st.requests = (st.requests || []).map(x => (gone.has(x.id) && x.status === 'pending'
+    ? { ...x, status: 'gone' as const, decidedAt: new Date().toISOString(), note: 'A piszkozatot közben a Gmailben elküldték vagy törölték (nem a Google fülön).' }
+    : x))
+  writeState(st)
 }
 
 /** Owner's decision. Approve sends exactly the draft that was shown (same recipients, subject, text). */

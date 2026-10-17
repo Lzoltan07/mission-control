@@ -11,7 +11,7 @@ import { apiFetch } from '@/lib/api-client'
 
 interface SendRequest {
   id: string; draftId: string; to: string; subject: string; preview: string; requestedBy: string; requestedAt: string
-  status: 'pending' | 'sent' | 'rejected' | 'failed'; decidedAt?: string; note?: string
+  status: 'pending' | 'sent' | 'rejected' | 'failed' | 'gone'; decidedAt?: string; note?: string
 }
 interface Status {
   connected: boolean; email: string | null; folderUrl: string | null; agents: string[]; requests: SendRequest[]
@@ -29,6 +29,7 @@ const SERVICES: Array<{ key: keyof Status['services']; label: string; what: stri
 ]
 const STATUS_HU: Record<SendRequest['status'], [string, string]> = {
   pending: ['Jóváhagyásra vár', 'text-yellow-400'], sent: ['Elküldve', 'text-green-400'], rejected: ['Elutasítva', 'text-muted-foreground'], failed: ['Nem ment el', 'text-red-400'],
+  gone: ['Gmailben kezelve', 'text-muted-foreground'],
 }
 
 export function GooglePanel() {
@@ -122,7 +123,7 @@ export function GooglePanel() {
                     <span className="text-foreground truncate max-w-[20rem]">{r.subject}</span>
                     <span className="text-xs text-muted-foreground">→ {r.to}</span>
                     <span className="ml-auto text-xs text-muted-foreground">{r.decidedAt ? new Date(r.decidedAt).toLocaleString('hu-HU') : ''}</span>
-                    {r.note && <span className="w-full text-xs text-red-400">{r.note}</span>}
+                    {r.note && <span className={`w-full text-xs ${r.status === 'failed' ? 'text-red-400' : 'text-muted-foreground'}`}>{r.note}</span>}
                   </div>
                 ))}
               </div>
