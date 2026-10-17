@@ -208,16 +208,18 @@ function zipEntries(buf: Buffer, wanted: (name: string) => boolean): Map<string,
 }
 
 async function pdfText(buf: Buffer): Promise<string> {
-  let mod: any
+  // unpdf (MIT, pdf.js build without dependencies), pinned in package.json; loaded only when a PDF is read.
+  const { getDocumentProxy, extractText } = await import('unpdf')
   try {
-    const name = 'unpdf'
-    mod = await import(/* webpackIgnore: true */ name)
-  } catch {
-    throw new MoodleError('PDF-olvasáshoz a Mission Controlba telepíteni kell az „unpdf” csomagot (lásd docs/17-moodle.md). A fájl letöltve a vaultba.', 501)
+    const pdf = await getDocumentProxy(new Uint8Array(buf))
+    const { text: pages } = await extractText(pdf, { mergePages: false })
+    const out = pages.map((t, i) => `--- ${i + 1}. oldal ---\n${t.trim()}`).join('\n\n')
+    if (!out.replace(/--- \d+\. oldal ---/g, '').trim()) throw new MoodleError('A PDF-ben nincs kinyerhető szöveg (valószínűleg szkennelt kép); a fájl letöltve a vaultba.', 422)
+    return out
+  } catch (err) {
+    if (err instanceof MoodleError) throw err
+    throw new MoodleError('A PDF nem olvasható (sérült vagy jelszóval védett); a fájl letöltve a vaultba.', 422)
   }
-  const pdf = await mod.getDocumentProxy(new Uint8Array(buf))
-  const { text: pages } = await mod.extractText(pdf, { mergePages: false })
-  return (pages as string[]).map((t, i) => `--- ${i + 1}. oldal ---\n${t.trim()}`).join('\n\n')
 }
 
 async function extractText(name: string, mime: string, buf: Buffer): Promise<string> {
