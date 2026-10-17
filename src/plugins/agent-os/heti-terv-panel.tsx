@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { apiFetch, ApiError } from '@/lib/api-client'
 
-interface PlanBlock { id: string; title: string; description: string; start: string; end: string; source: 'agent' | 'user'; createdBy: string; link?: string }
+interface PlanBlock { id: string; title: string; description: string; start: string; end: string; source: 'agent' | 'user' | 'sync'; createdBy: string; link?: string; allDay?: boolean }
 interface BusySlot { start: string; end: string }
 interface WeekView { provider: 'local' | 'google'; connected: boolean; calendarName: string; timezone: string; busy: BusySlot[]; blocks: PlanBlock[] }
 
@@ -100,6 +100,22 @@ export function HetiTervPanel() {
     }
   }
 
+  // University timetable (Neptun classes + exams) into the plan: see src/lib/agent-os/uni-sync.ts.
+  const [syncing, setSyncing] = useState(false)
+  const [syncInfo, setSyncInfo] = useState<string | null>(null)
+  const syncUni = async () => {
+    setSyncing(true); setSyncInfo(null)
+    try {
+      const r = await apiFetch<{ classes: number; exams: number; created: number; updated: number; removed: number }>('/api/agent-os/calendar/sync', { method: 'POST' })
+      setSyncInfo(`${r.classes} óra, ${r.exams} vizsga a következő 4 hétben · új: ${r.created}, frissítve: ${r.updated}, levéve: ${r.removed}`)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'A szinkron nem sikerült')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const byDay = (d: Date) => {
     const from = d.getTime(), to = from + 86400000
     const inDay = (s: string, e: string) => Date.parse(s) < to && Date.parse(e) > from
@@ -130,6 +146,10 @@ export function HetiTervPanel() {
             <a className="text-primary underline" href="/api/agent-os/calendar/oauth?action=start">Google Naptár összekapcsolása</a>
           )}
           <span>Szürke: foglalt idő a többi naptáradból (részletek nélkül).</span>
+          {data.provider === 'google' && data.connected && (
+            <Button variant="ghost" size="xs" onClick={() => void syncUni()} disabled={syncing}>{syncing ? 'Órák frissítése…' : '🎓 Egyetemi órák frissítése'}</Button>
+          )}
+          {syncInfo && <span className="text-sky-300">{syncInfo}</span>}
         </div>
       )}
 
@@ -149,14 +169,14 @@ export function HetiTervPanel() {
               <div className="space-y-1 flex-1">
                 {busy.map((s, k) => (
                   <div key={`busy-${k}`} className="text-xs rounded px-2 py-1 bg-secondary text-muted-foreground">
-                    Foglalt {hhmm(s.start)}–{hhmm(s.end)}
+                    Foglalt {Date.parse(s.end) - Date.parse(s.start) >= 86_400_000 ? 'egész nap' : `${hhmm(s.start)}–${hhmm(s.end)}`}
                   </div>
                 ))}
                 {blocks.map(b => (
                   <div key={b.id} className="text-xs rounded px-2 py-1 border border-border bg-surface-2 group">
                     <div className="flex items-center gap-1">
-                      <span className="font-medium text-foreground">{hhmm(b.start)}–{hhmm(b.end)}</span>
-                      <span className={`ml-auto rounded px-1 ${b.source === 'agent' ? 'text-primary' : 'text-green-400'}`}>{b.source === 'agent' ? 'ágens' : 'saját'}</span>
+                      <span className="font-medium text-foreground">{b.allDay ? 'egész nap' : `${hhmm(b.start)}–${hhmm(b.end)}`}</span>
+                      <span className={`ml-auto rounded px-1 ${b.source === 'agent' ? 'text-primary' : b.source === 'sync' ? 'text-sky-300' : 'text-green-400'}`}>{b.source === 'agent' ? 'ágens' : b.source === 'sync' ? 'egyetem' : 'saját'}</span>
                     </div>
                     <div className="text-foreground/90 break-words">{b.title}</div>
                     {b.description && <div className="text-muted-foreground line-clamp-2 break-words">{b.description}</div>}

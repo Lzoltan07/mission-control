@@ -10,8 +10,8 @@ export default getRequestConfig(async () => {
   const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value as Locale | undefined
   if (cookieLocale && locales.includes(cookieLocale)) {
     locale = cookieLocale
-  } else {
-    // 2. Fall back to Accept-Language header
+  } else if (process.env.MC_LOCALE_FROM_BROWSER === '1') {
+    // 2. Fall back to Accept-Language header (Agent OS fork: off by default, the default locale wins)
     const headerStore = await headers()
     const acceptLang = headerStore.get('accept-language') || ''
     const preferred = acceptLang

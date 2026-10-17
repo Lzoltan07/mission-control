@@ -33,9 +33,10 @@ export interface PlanBlock {
   description: string
   start: string // ISO 8601
   end: string
-  source: 'agent' | 'user'
+  source: 'agent' | 'user' | 'sync'
   createdBy: string
   link?: string
+  allDay?: boolean
 }
 
 export interface BusySlot { start: string; end: string }
@@ -270,9 +271,11 @@ function fromGoogleEvent(e: any): PlanBlock {
     id: e.id,
     title: e.summary || '(cím nélkül)',
     description: e.description || '',
-    start: new Date(e.start?.dateTime || e.start?.date).toISOString(),
-    end: new Date(e.end?.dateTime || e.end?.date).toISOString(),
-    source: priv.aosSource === 'agent' ? 'agent' : 'user',
+    // All-day events carry a date: read it as local midnight (not UTC), so it lands on the right day.
+    start: (e.start?.dateTime ? new Date(e.start.dateTime) : new Date(`${e.start?.date}T00:00:00`)).toISOString(),
+    end: (e.end?.dateTime ? new Date(e.end.dateTime) : new Date(`${e.end?.date}T00:00:00`)).toISOString(),
+    allDay: !e.start?.dateTime,
+    source: priv.aosSource === 'agent' ? 'agent' : priv.aosSource === 'sync' ? 'sync' : 'user',
     createdBy: priv.aosCreatedBy || 'google',
     link: e.htmlLink,
   }
@@ -312,6 +315,55 @@ const google = {
     const calId = await ensureGoogleCalendar()
     await gapi('DELETE', `/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(id)}`)
   },
+}
+
+// ---------------------------------------------------------------------------
+// Sync from other calendars (uni-sync.ts): only blocks marked aosSource=sync are touched
+// ---------------------------------------------------------------------------
+
+export interface SyncItem { syncId: string; title: string; description: string; start: string; end: string; allDay: boolean }
+
+/** Makes the sync blocks in [from, to) match `items`: creates, updates, removes – own blocks only. */
+export async function syncPlanBlocks(items: SyncItem[], from: string, to: string) {
+  if (!readGoogle().refresh_token) throw new CalendarError('Google Calendar is not connected', 409)
+  const calId = await ensureGoogleCalendar()
+  const base = `/calendars/${encodeURIComponent(calId)}/events`
+  const existing: any[] = []
+  let pageToken = ''
+  for (let page = 0; page < 10; page++) {
+    const q = new URLSearchParams({ timeMin: from, timeMax: to, singleEvents: 'true', maxResults: '250', privateExtendedProperty: 'aosSource=sync', ...(pageToken ? { pageToken } : {}) })
+    const r = await gapi('GET', `${base}?${q}`)
+    existing.push(...(r.items || []).filter((e: any) => e.status !== 'cancelled'))
+    if (!r.nextPageToken) break
+    pageToken = r.nextPageToken
+  }
+  const bySyncId = new Map(existing.map(e => [e.extendedProperties?.private?.aosSyncId, e]))
+  const dateOnly = (iso: string) => iso.slice(0, 10)
+  const body = (it: SyncItem) => ({
+    summary: it.title, description: it.description,
+    start: it.allDay ? { date: dateOnly(it.start) } : { dateTime: it.start, timeZone: TIMEZONE },
+    end: it.allDay ? { date: dateOnly(it.end) } : { dateTime: it.end, timeZone: TIMEZONE },
+    transparency: it.allDay ? 'transparent' : 'opaque',
+    extendedProperties: { private: { aosSource: 'sync', aosCreatedBy: 'egyetem-szinkron', aosSyncId: it.syncId } },
+  })
+  let created = 0, updated = 0, removed = 0
+  const wanted = new Set<string>()
+  for (const it of items) {
+    wanted.add(it.syncId)
+    const cur = bySyncId.get(it.syncId)
+    if (!cur) { await gapi('POST', base, body(it)); created++; continue }
+    const curStart = cur.start?.dateTime ? new Date(cur.start.dateTime).toISOString() : cur.start?.date
+    const curEnd = cur.end?.dateTime ? new Date(cur.end.dateTime).toISOString() : cur.end?.date
+    const wantStart = it.allDay ? dateOnly(it.start) : new Date(it.start).toISOString()
+    const wantEnd = it.allDay ? dateOnly(it.end) : new Date(it.end).toISOString()
+    if (cur.summary !== it.title || (cur.description || '') !== it.description || curStart !== wantStart || curEnd !== wantEnd) {
+      await gapi('PATCH', `${base}/${encodeURIComponent(cur.id)}`, body(it)); updated++
+    }
+  }
+  for (const e of existing) {
+    if (!wanted.has(e.extendedProperties?.private?.aosSyncId)) { await gapi('DELETE', `${base}/${encodeURIComponent(e.id)}`); removed++ }
+  }
+  return { created, updated, removed }
 }
 
 export function calendarProvider() {

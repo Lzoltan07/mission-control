@@ -402,6 +402,28 @@ export async function calendarEvents(fromIso: string, toIso: string, limit = 50)
   return out.sort((a, b) => String(a.start).localeCompare(String(b.start))).slice(0, Math.min(Math.max(limit, 1), 200))
 }
 
+/** Raw events of all visible calendars (with ids), for the university sync. */
+export async function listEventsRaw(fromIso: string, toIso: string) {
+  const cals = (await getJson('https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader')).items || []
+  const out: Array<{ id: string; calendarId: string; calendar: string; title: string; start: string; end: string; allDay: boolean; location: string | null }> = []
+  for (const c of cals.filter((c: any) => !c.hidden).slice(0, 15)) {
+    let pageToken = ''
+    for (let page = 0; page < 5; page++) {
+      const p = new URLSearchParams({ timeMin: fromIso, timeMax: toIso, singleEvents: 'true', orderBy: 'startTime', maxResults: '250', timeZone: TZ, ...(pageToken ? { pageToken } : {}) })
+      const ev = await getJson(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(c.id)}/events?${p}`).catch(() => ({ items: [] }))
+      for (const e of ev.items || []) {
+        if (e.status === 'cancelled' || e.extendedProperties?.private?.aosSource) continue // skip our own plan blocks
+        const allDay = !!e.start?.date
+        out.push({ id: e.id, calendarId: c.id, calendar: c.summaryOverride || c.summary, title: e.summary || '', allDay,
+          start: allDay ? e.start.date : new Date(e.start.dateTime).toISOString(), end: allDay ? e.end.date : new Date(e.end.dateTime).toISOString(), location: e.location || null })
+      }
+      if (!ev.nextPageToken) break
+      pageToken = ev.nextPageToken
+    }
+  }
+  return out
+}
+
 // --- Contacts (read) --------------------------------------------------------------------------------------
 export async function contactSearch(query: string, limit = 10) {
   const q = query.trim()
