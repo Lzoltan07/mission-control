@@ -83,7 +83,7 @@ export async function syncUniversity(): Promise<UniSyncResult> {
       moodle = due.length
     } catch (err) {
       // Never the URL in the message (fetchMoodleIcs only names the host).
-      moodleError = err instanceof Error ? err.message : 'Moodle could not be read'
+      moodleError = err instanceof Error ? err.message : 'A Moodle nem olvasható'
       keep.push('moodle:')
     }
   }

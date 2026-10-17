@@ -18,19 +18,19 @@ const MAX_BYTES = 2_000_000
 /** Fetches the export; errors never contain the URL (it carries the token). */
 export async function fetchMoodleIcs(url: string): Promise<string> {
   let u: URL
-  try { u = new URL(url) } catch { throw new Error('AOS_MOODLE_ICS_URL is not a valid URL') }
-  if (u.protocol !== 'https:') throw new Error('AOS_MOODLE_ICS_URL must be https')
+  try { u = new URL(url) } catch { throw new Error('Az AOS_MOODLE_ICS_URL nem érvényes cím') }
+  if (u.protocol !== 'https:') throw new Error('Az AOS_MOODLE_ICS_URL csak https lehet')
   let res: Response
   try {
     res = await fetch(u, { headers: { accept: 'text/calendar' }, redirect: 'follow', signal: AbortSignal.timeout(30_000) })
   } catch {
-    throw new Error(`Moodle (${u.host}) is not reachable`)
+    throw new Error(`A Moodle (${u.host}) nem érhető el`)
   }
-  if (!res.ok) throw new Error(`Moodle (${u.host}) answered ${res.status}`)
-  if (new URL(res.url || u.href).protocol !== 'https:') throw new Error('Moodle redirected to a non-https address')
+  if (!res.ok) throw new Error(`A Moodle (${u.host}) hibát adott: HTTP ${res.status}`)
+  if (new URL(res.url || u.href).protocol !== 'https:') throw new Error('A Moodle nem https címre irányított át')
   const text = await res.text()
-  if (text.length > MAX_BYTES) throw new Error('The Moodle export is too large')
-  if (!text.includes('BEGIN:VCALENDAR')) throw new Error('The Moodle address did not return a calendar (expired token?)')
+  if (text.length > MAX_BYTES) throw new Error('A Moodle-export túl nagy')
+  if (!text.includes('BEGIN:VCALENDAR')) throw new Error('A cím nem naptárat adott vissza (rossz link vagy lejárt kulcs?)')
   return text
 }
 
