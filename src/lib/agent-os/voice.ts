@@ -130,7 +130,8 @@ export async function synthesize(text: string, voice: string, rate: number): Pro
 
 export interface Turn { ki: 'en' | 'agens'; szoveg: string }
 
-export function askAgent(kerdes: string, elozmeny: Turn[]): Promise<string> {
+/** The answer, plus what the run consumed (ask-agent.mjs reports it; unknown → undefined). */
+export function askAgent(kerdes: string, elozmeny: Turn[]): Promise<{ valasz: string; usage?: unknown }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(RUNNER_DIR, 'ask-agent.mjs'), '--agent', VOICE_AGENT], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -141,10 +142,10 @@ export function askAgent(kerdes: string, elozmeny: Turn[]): Promise<string> {
     child.stderr.on('data', () => {})
     child.on('error', () => reject(new VoiceError('Voice agent could not be started', 500)))
     child.on('close', () => {
-      let result: { valasz?: string; hiba?: string } = {}
+      let result: { valasz?: string; hiba?: string; usage?: unknown } = {}
       try { result = JSON.parse(Buffer.concat(out).toString('utf8')) } catch {}
-      if (typeof result.valasz === 'string' && result.valasz) resolve(result.valasz)
-      else reject(new VoiceError(result.hiba || 'Voice agent returned no answer', 502))
+      if (typeof result.valasz === 'string' && result.valasz) resolve({ valasz: result.valasz, usage: result.usage })
+      else reject(Object.assign(new VoiceError(result.hiba || 'Voice agent returned no answer', 502), { usage: result.usage }))
     })
     child.stdin.end(JSON.stringify({ kerdes, elozmeny }))
   })

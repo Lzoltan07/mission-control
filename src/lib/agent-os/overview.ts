@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { getDatabase } from '@/lib/db'
 import { calendarProvider } from '@/lib/agent-os/calendar'
+import { usageSummary } from '@/lib/agent-os/executions'
 import { FUNCTIONS, type AgentWatch, type FunctionStatus, type RuntimeWatch } from '@/lib/agent-os/functions-catalog'
 import { detectRuntime } from '@/lib/agent-runtimes'
 import { scanCodexSessions } from '@/lib/codex-sessions'
@@ -148,11 +149,16 @@ export async function functionStatuses(workspaceId: number, localMode: boolean):
       { label: 'Felolvasás (Piper)', value: piperOk ? 'fut' : 'nem fut' },
     ] })
 
-  // Cost
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const cost = one('SELECT COALESCE(SUM(cost_usd),0) usd, COALESCE(SUM(input_tokens+output_tokens),0) tok, MAX(created_at) t FROM token_usage WHERE workspace_id = ? AND created_at >= ?', workspaceId, Math.floor(today.getTime() / 1000) - 29 * DAY)
-  set({ id: 'cost-tracker', state: cost.tok ? 'ok' : 'idle', summary: `${Number(cost.usd || 0).toFixed(2)} USD az elmúlt 30 napban`, lastChange: iso(cost.t),
-    details: [{ label: 'Token', value: num(Number(cost.tok || 0)) }] })
+  // Cost: the agents' and voice questions' own consumption reports (Tevékenység → Fogyasztás). The upstream
+  // token_usage table stays empty here (on the subscription it would record 0 USD anyway).
+  const u = usageSummary(workspaceId)
+  set({ id: 'cost-tracker', state: u.month.runs ? 'ok' : 'idle', summary: `~${u.month.costUsd.toFixed(2)} USD-egyenérték az elmúlt 30 napban (${u.month.runs} futás)`,
+    lastChange: u.top[0]?.finishedAt ?? undefined,
+    details: [
+      { label: 'Ma', value: `~${u.today.costUsd.toFixed(2)} USD · ${u.today.runs} futás` },
+      { label: 'Token (30 nap)', value: num(u.month.tokens) },
+      { label: 'Interaktív Claude Code', value: `~${u.interactive.costUsd.toFixed(2)} USD · ${u.interactive.sessions} munkamenet` },
+    ] })
 
   // Webhooks, alerts, GitHub
   const wh = one('SELECT COUNT(*) c, SUM(enabled) e, MAX(last_fired_at) t, SUM(consecutive_failures > 0) f FROM webhooks WHERE workspace_id = ?', workspaceId)

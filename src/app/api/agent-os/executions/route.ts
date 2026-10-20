@@ -5,19 +5,36 @@
  *   POST {action:'rename', deviceId, name}            viewer+ (people)  name this device
  *   POST {action:'start', title, taskId?, workerDevice?, progress?}
  *                                                     agent key (operator) → { id }   an agent starts a task run
- *   POST {action:'update', id, status?, progress?}    agent key (own runs only)
+ *   POST {action:'update', id, status?, progress?, usage?}   agent key (own runs only); usage = what
+ *                                                     Claude Code reported for the run (turns, tokens, USD)
+ *   POST {action:'record', title, taskId?, status, progress?, startedAt, finishedAt, usage}
+ *                                                     agent key → { id }   a finished run logged afterwards
+ *   GET ?view=usage&since=<unix s>                    people, or the notifier agent ("ertesito") →
+ *                                                     { summary, runs finished after `since` }
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
-import { listExecutions, renameDevice, startExecution, THIS_MACHINE, touchDevice, updateExecution, validDeviceId, type ExecStatus } from '@/lib/agent-os/executions'
+import {
+  finishedRunsSince, listExecutions, parseUsage, recordExecution, renameDevice, startExecution, THIS_MACHINE, touchDevice,
+  updateExecution, usageSummary, validDeviceId, type ExecStatus,
+} from '@/lib/agent-os/executions'
 
 const STATUSES: ExecStatus[] = ['running', 'done', 'failed']
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
+  const params = new URL(request.url).searchParams
+  if (params.get('view') === 'usage') {
+    if (auth.user.agent_name && auth.user.agent_name !== 'ertesito') return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+    const since = Number(params.get('since'))
+    return NextResponse.json({
+      summary: usageSummary(auth.user.workspace_id),
+      runs: Number.isFinite(since) && since > 0 ? finishedRunsSince(auth.user.workspace_id, since) : [],
+    })
+  }
   if (auth.user.agent_name) return NextResponse.json({ error: 'People only' }, { status: 403 })
-  return NextResponse.json({ ...listExecutions(auth.user.workspace_id), machine: THIS_MACHINE })
+  return NextResponse.json({ ...listExecutions(auth.user.workspace_id), usage: usageSummary(auth.user.workspace_id), machine: THIS_MACHINE })
 }
 
 export async function POST(request: NextRequest) {
@@ -35,11 +52,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  if (action === 'start' || action === 'update') {
+  if (action === 'start' || action === 'update' || action === 'record') {
     const auth = requireRole(request, 'operator')
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
     const agent = auth.user.agent_name
     if (!agent) return NextResponse.json({ error: 'Agent key required' }, { status: 403 })
+    if (action === 'record') {
+      const title = typeof body?.title === 'string' ? body.title.trim() : ''
+      const usage = parseUsage(body?.usage)
+      const startedAt = Number(body?.startedAt), finishedAt = Number(body?.finishedAt)
+      const status = body?.status === 'done' ? 'done' : 'failed'
+      if (!title || !usage || !Number.isInteger(startedAt) || !Number.isInteger(finishedAt) || finishedAt < startedAt || finishedAt > Date.now() / 1000 + 60) {
+        return NextResponse.json({ error: 'Invalid record' }, { status: 400 })
+      }
+      const id = recordExecution({
+        workspaceId: auth.user.workspace_id, title, taskId: Number.isInteger(body?.taskId) ? Number(body!.taskId) : null, agent,
+        workerDevice: typeof body?.workerDevice === 'string' ? body.workerDevice : null, status,
+        progress: typeof body?.progress === 'string' ? body.progress : null, startedAt, finishedAt, usage,
+      })
+      return NextResponse.json({ id })
+    }
     if (action === 'start') {
       const title = typeof body?.title === 'string' ? body.title.trim() : ''
       if (!title) return NextResponse.json({ error: 'Missing title' }, { status: 400 })
@@ -54,7 +86,8 @@ export async function POST(request: NextRequest) {
     const id = Number(body?.id)
     const status = STATUSES.includes(body?.status as ExecStatus) ? body!.status as ExecStatus : undefined
     const progress = typeof body?.progress === 'string' ? body.progress : undefined
-    if (!Number.isInteger(id) || !updateExecution(id, auth.user.workspace_id, { status, progress }, agent)) {
+    const usage = parseUsage(body?.usage)
+    if (!Number.isInteger(id) || !updateExecution(id, auth.user.workspace_id, { status, progress, usage }, agent)) {
       return NextResponse.json({ error: 'Unknown run' }, { status: 404 })
     }
     return NextResponse.json({ ok: true })

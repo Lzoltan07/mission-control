@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
 import { VoiceError, askAgent, type Turn } from '@/lib/agent-os/voice'
-import { startExecution, touchDevice, updateExecution, validDeviceId } from '@/lib/agent-os/executions'
+import { parseUsage, startExecution, touchDevice, updateExecution, validDeviceId } from '@/lib/agent-os/executions'
 
 let busy = false // one voice question at a time (each spawns a Claude Code session)
 
@@ -34,11 +34,13 @@ export async function POST(request: NextRequest) {
     sourceUser: auth.user.username, sourceDeviceId: validDeviceId(device) ? device : null, progress: 'Az ágens gondolkodik',
   })
   try {
-    const valasz = await askAgent(kerdes, elozmeny)
-    updateExecution(run, auth.user.workspace_id, { status: 'done', progress: valasz.slice(0, 200) })
+    const { valasz, usage } = await askAgent(kerdes, elozmeny)
+    updateExecution(run, auth.user.workspace_id, { status: 'done', progress: valasz.slice(0, 200), usage: parseUsage(usage) })
     return NextResponse.json({ valasz })
   } catch (err) {
-    updateExecution(run, auth.user.workspace_id, { status: 'failed', progress: err instanceof Error ? err.message : 'Hiba' })
+    updateExecution(run, auth.user.workspace_id, {
+      status: 'failed', progress: err instanceof Error ? err.message : 'Hiba', usage: parseUsage((err as { usage?: unknown })?.usage),
+    })
     if (err instanceof VoiceError) return NextResponse.json({ error: err.message }, { status: err.status })
     return NextResponse.json({ error: 'Voice request failed' }, { status: 500 })
   } finally {

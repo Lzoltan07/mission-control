@@ -4,12 +4,28 @@
  *   aos_devices       one row per browser (random id kept in its localStorage), optional name
  *   aos_device_seen   heartbeats (one per minute while Mission Control is open; kept 7 days) – used
  *                     to tell which device was active when a task was assigned on the board
- *   aos_executions    one row per run (voice question, agent task run), updated while it runs
+ *   aos_executions    one row per run (voice question, agent task run), updated while it runs; since
+ *                     2026-10-20 also what the run consumed (Claude Code's own report: turns, tokens,
+ *                     API-equivalent USD – on the subscription this is no bill, it measures how much of
+ *                     the usage allowance a run takes) and why it ended (ok, max_turns, limit, auth, error)
  */
 import os from 'node:os'
 import { getDatabase } from '@/lib/db'
 
 export type ExecStatus = 'running' | 'done' | 'failed'
+export type EndReason = 'ok' | 'max_turns' | 'limit' | 'auth' | 'error'
+
+export interface RunUsage {
+  model: string | null
+  turns: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+  durationMs: number
+  endReason: EndReason
+}
 
 export interface Execution {
   id: number
@@ -26,6 +42,7 @@ export interface Execution {
   startedAt: string
   updatedAt: string
   finishedAt: string | null
+  usage: RunUsage | null
 }
 
 export const THIS_MACHINE = process.env.AOS_DEVICE_NAME || os.hostname()
@@ -51,6 +68,12 @@ function db() {
         finished_at INTEGER);
       CREATE INDEX IF NOT EXISTS aos_executions_ws ON aos_executions (workspace_id, started_at);
     `)
+    // Usage columns (added 2026-10-20; older databases get them here).
+    const have = new Set((d.prepare('PRAGMA table_info(aos_executions)').all() as Array<{ name: string }>).map(c => c.name))
+    for (const [col, type] of [['model', 'TEXT'], ['turns', 'INTEGER'], ['input_tokens', 'INTEGER'], ['output_tokens', 'INTEGER'],
+      ['cache_read_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['cost_usd', 'REAL'], ['duration_ms', 'INTEGER'], ['end_reason', 'TEXT']]) {
+      if (!have.has(col)) d.exec(`ALTER TABLE aos_executions ADD COLUMN ${col} ${type}`)
+    }
     ready = true
   }
   return d
@@ -117,14 +140,124 @@ export function startExecution(input: {
 }
 
 /** Updates a run; returns false when it does not exist (or belongs to another agent). */
-export function updateExecution(id: number, workspaceId: number, change: { status?: ExecStatus; progress?: string | null }, agent?: string): boolean {
+export function updateExecution(id: number, workspaceId: number, change: { status?: ExecStatus; progress?: string | null; usage?: RunUsage | null }, agent?: string): boolean {
   const row = db().prepare('SELECT agent FROM aos_executions WHERE id = ? AND workspace_id = ?').get(id, workspaceId) as { agent: string | null } | undefined
   if (!row || (agent && row.agent !== agent)) return false
   const t = now()
   db().prepare(`UPDATE aos_executions SET status = COALESCE(?, status), progress = COALESCE(?, progress), updated_at = ?,
                 finished_at = CASE WHEN ? IN ('done','failed') THEN ? ELSE finished_at END WHERE id = ?`)
     .run(change.status ?? null, change.progress?.slice(0, 200) ?? null, t, change.status ?? null, t, id)
+  if (change.usage) setUsage(id, change.usage)
   return true
+}
+
+function setUsage(id: number, u: RunUsage) {
+  db().prepare(`UPDATE aos_executions SET model = ?, turns = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
+                cache_write_tokens = ?, cost_usd = ?, duration_ms = ?, end_reason = ? WHERE id = ?`)
+    .run(u.model, u.turns, u.inputTokens, u.outputTokens, u.cacheReadTokens, u.cacheWriteTokens, u.costUsd, u.durationMs, u.endReason, id)
+}
+
+const END_REASONS: EndReason[] = ['ok', 'max_turns', 'limit', 'auth', 'error']
+const nonNeg = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(v, max) : 0)
+
+/** Validates a usage report from an agent runner (its own numbers, never trusted beyond sane bounds). */
+export function parseUsage(v: unknown): RunUsage | null {
+  if (!v || typeof v !== 'object') return null
+  const u = v as Record<string, unknown>
+  return {
+    model: typeof u.model === 'string' ? u.model.slice(0, 80) : null,
+    turns: Math.round(nonNeg(u.turns, 1000)),
+    inputTokens: Math.round(nonNeg(u.inputTokens, 1e10)),
+    outputTokens: Math.round(nonNeg(u.outputTokens, 1e10)),
+    cacheReadTokens: Math.round(nonNeg(u.cacheReadTokens, 1e11)),
+    cacheWriteTokens: Math.round(nonNeg(u.cacheWriteTokens, 1e11)),
+    costUsd: nonNeg(u.costUsd, 10_000),
+    durationMs: Math.round(nonNeg(u.durationMs, 86_400_000)),
+    endReason: END_REASONS.includes(u.endReason as EndReason) ? u.endReason as EndReason : 'error',
+  }
+}
+
+/** A finished run recorded afterwards (back-filling older run logs). Returns the new id. */
+export function recordExecution(input: {
+  workspaceId: number; title: string; taskId: number | null; agent: string; workerDevice: string | null
+  status: ExecStatus; progress: string | null; startedAt: number; finishedAt: number; usage: RunUsage
+}): number {
+  const res = db().prepare(`INSERT INTO aos_executions (workspace_id, kind, title, task_id, agent, worker_device, status, progress, started_at, updated_at, finished_at)
+                            VALUES (?, 'feladat', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(input.workspaceId, input.title.slice(0, 200), input.taskId, input.agent, (input.workerDevice || THIS_MACHINE).slice(0, 64),
+      input.status, input.progress?.slice(0, 200) ?? null, input.startedAt, input.finishedAt, input.finishedAt)
+  const id = Number(res.lastInsertRowid)
+  setUsage(id, input.usage)
+  return id
+}
+
+function usageOf(r: Record<string, any>): RunUsage | null {
+  if (r.end_reason == null) return null
+  return {
+    model: r.model, turns: r.turns || 0, inputTokens: r.input_tokens || 0, outputTokens: r.output_tokens || 0,
+    cacheReadTokens: r.cache_read_tokens || 0, cacheWriteTokens: r.cache_write_tokens || 0, costUsd: r.cost_usd || 0,
+    durationMs: r.duration_ms || 0, endReason: r.end_reason,
+  }
+}
+
+// ---- consumption summary (Tevékenység page, notifier) -------------------------------------------------
+
+export interface UsageWindow { runs: number; costUsd: number; tokens: number; maxTurns: number; limits: number }
+
+export interface UsageSummary {
+  today: UsageWindow
+  week: UsageWindow
+  month: UsageWindow
+  byAgent: Array<{ agent: string; runs: number; costUsd: number; tokens: number }>
+  top: Array<{ id: number; title: string; taskId: number | null; agent: string | null; costUsd: number; turns: number; endReason: string; finishedAt: string | null }>
+  /** Interactive Claude Code sessions on this machine (incl. these chats) active in the last 30 days. */
+  interactive: { sessions: number; costUsd: number; tokens: number }
+  alertUsd: number
+}
+
+function startOfToday(): number {
+  const d = new Date(); d.setHours(0, 0, 0, 0)
+  return Math.floor(d.getTime() / 1000)
+}
+
+export function usageSummary(workspaceId: number): UsageSummary {
+  const d = db()
+  const window = (since: number): UsageWindow => {
+    const r = d.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(cost_usd),0) cost, COALESCE(SUM(input_tokens+output_tokens+cache_read_tokens+cache_write_tokens),0) tok,
+                         COALESCE(SUM(end_reason = 'max_turns'),0) mt, COALESCE(SUM(end_reason = 'limit'),0) lim
+                         FROM aos_executions WHERE workspace_id = ? AND end_reason IS NOT NULL AND started_at >= ?`).get(workspaceId, since) as Record<string, number>
+    return { runs: r.runs, costUsd: r.cost, tokens: r.tok, maxTurns: r.mt, limits: r.lim }
+  }
+  const today = startOfToday()
+  const month = today - 29 * 86400
+  const byAgent = (d.prepare(`SELECT COALESCE(agent,'?') agent, COUNT(*) runs, COALESCE(SUM(cost_usd),0) cost,
+                              COALESCE(SUM(input_tokens+output_tokens+cache_read_tokens+cache_write_tokens),0) tok
+                              FROM aos_executions WHERE workspace_id = ? AND end_reason IS NOT NULL AND started_at >= ?
+                              GROUP BY agent ORDER BY cost DESC`).all(workspaceId, month) as Array<Record<string, any>>)
+    .map(r => ({ agent: r.agent, runs: r.runs, costUsd: r.cost, tokens: r.tok }))
+  const top = (d.prepare(`SELECT id, title, task_id, agent, cost_usd, turns, end_reason, finished_at FROM aos_executions
+                          WHERE workspace_id = ? AND end_reason IS NOT NULL AND started_at >= ? ORDER BY cost_usd DESC LIMIT 5`).all(workspaceId, month) as Array<Record<string, any>>)
+    .map(r => ({ id: r.id, title: r.title, taskId: r.task_id, agent: r.agent, costUsd: r.cost_usd || 0, turns: r.turns || 0, endReason: r.end_reason, finishedAt: iso(r.finished_at) }))
+  let interactive = { sessions: 0, costUsd: 0, tokens: 0 }
+  try {
+    const r = d.prepare(`SELECT COUNT(*) n, COALESCE(SUM(estimated_cost),0) cost, COALESCE(SUM(input_tokens+output_tokens),0) tok
+                         FROM claude_sessions WHERE last_message_at >= ?`).get(new Date(month * 1000).toISOString()) as Record<string, number>
+    interactive = { sessions: r.n, costUsd: r.cost, tokens: r.tok }
+  } catch { /* the session scanner is off */ }
+  return { today: window(today), week: window(today - 6 * 86400), month: window(month), byAgent, top, interactive, alertUsd: costAlertUsd() }
+}
+
+export function costAlertUsd(): number {
+  const v = Number(process.env.AOS_COST_ALERT_USD)
+  return Number.isFinite(v) && v > 0 ? v : 2
+}
+
+/** Runs with usage that finished after `since` (unix seconds) – the notifier's input for alerts. */
+export function finishedRunsSince(workspaceId: number, since: number) {
+  return (db().prepare(`SELECT id, title, task_id, agent, kind, cost_usd, turns, duration_ms, end_reason, finished_at FROM aos_executions
+                        WHERE workspace_id = ? AND end_reason IS NOT NULL AND finished_at > ? ORDER BY finished_at`).all(workspaceId, since) as Array<Record<string, any>>)
+    .map(r => ({ id: r.id, title: r.title, taskId: r.task_id, agent: r.agent, kind: r.kind, costUsd: r.cost_usd || 0, turns: r.turns || 0,
+      durationMs: r.duration_ms || 0, endReason: r.end_reason as EndReason, finishedAt: r.finished_at as number }))
 }
 
 export function listExecutions(workspaceId: number, limit = 100): { executions: Execution[]; devices: Array<{ id: string; name: string | null; uaLabel: string; lastSeen: string }> } {
@@ -140,6 +273,7 @@ export function listExecutions(workspaceId: number, limit = 100): { executions: 
         sourceDevice: dev ? (dev.name ? `${dev.name} (${dev.ua_label})` : dev.ua_label) : null,
         sourceEstimated: !!r.source_estimated, agent: r.agent, workerDevice: r.worker_device, status: r.status,
         progress: r.progress, startedAt: iso(r.started_at)!, updatedAt: iso(r.updated_at)!, finishedAt: iso(r.finished_at),
+        usage: usageOf(r),
       }
     }),
     devices: devices.map(x => ({ id: x.id, name: x.name, uaLabel: x.ua_label, lastSeen: iso(x.last_seen)! })),
