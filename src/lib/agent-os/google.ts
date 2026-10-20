@@ -374,14 +374,24 @@ export async function driveSave(name: string, content: string, asGoogleDoc = tru
   if (!cleanName) throw new GoogleError('Adj nevet a fájlnak.', 400)
   if (!content || content.length > 500_000) throw new GoogleError('Üres vagy túl hosszú tartalom.', 400)
   const folder = await ensureFolder()
-  const boundary = 'aos' + crypto.randomBytes(8).toString('hex')
   const meta = { name: cleanName, parents: [folder], ...(asGoogleDoc ? { mimeType: 'application/vnd.google-apps.document' } : {}) }
-  const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
-    `--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${content}\r\n--${boundary}--`
-  const res = await gapi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink', {
-    method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
-  })
-  return res.json()
+  const upload = (sourceType: string) => {
+    const boundary = 'aos' + crypto.randomBytes(8).toString('hex')
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+      `--${boundary}\r\nContent-Type: ${sourceType}; charset=UTF-8\r\n\r\n${content}\r\n--${boundary}--`
+    return gapi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink', {
+      method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
+    })
+  }
+  if (!asGoogleDoc) return (await upload('text/plain')).json()
+  // Google Doc: imported as Markdown, so headings, lists, bold, links and tables come out formatted.
+  // Should Drive refuse the Markdown import (HTTP 400), the text is still saved, unformatted.
+  try {
+    return { ...(await (await upload('text/markdown')).json()), format: 'markdown' }
+  } catch (err) {
+    if (!(err instanceof GoogleError) || !/HTTP 400\b/.test(err.message)) throw err
+    return { ...(await (await upload('text/plain')).json()), format: 'plain' }
+  }
 }
 
 // --- Calendar (read all calendars) ------------------------------------------------------------------------
