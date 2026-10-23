@@ -9,6 +9,7 @@ import path from 'node:path'
 import { getDatabase } from '@/lib/db'
 import { calendarProvider } from '@/lib/agent-os/calendar'
 import { usageSummary } from '@/lib/agent-os/executions'
+import { voiceServersStatus } from '@/lib/agent-os/voice-servers'
 import { FUNCTIONS, type AgentWatch, type FunctionStatus, type RuntimeWatch } from '@/lib/agent-os/functions-catalog'
 import { detectRuntime } from '@/lib/agent-runtimes'
 import { scanCodexSessions } from '@/lib/codex-sessions'
@@ -147,6 +148,7 @@ export async function functionStatuses(workspaceId: number, localMode: boolean):
       { label: 'Ébresztőszó (Jarvis)', value: wakeOk ? 'fut' : 'nem fut' },
       { label: 'Parancsok leírása', value: whisperOk ? 'fut' : 'nem fut' },
       { label: 'Felolvasás (Piper)', value: piperOk ? 'fut' : 'nem fut' },
+      ...voiceSupervisorDetails(),
     ] })
 
   // Cost: the agents' and voice questions' own consumption reports (Tevékenység → Fogyasztás). The upstream
@@ -280,4 +282,12 @@ export function runtimeWatch(workspaceId: number): RuntimeWatch[] {
       note: rt.installed ? null : RUNTIME_PHASE[id] ? `Még nincs telepítve (${RUNTIME_PHASE[id]})` : 'Nincs telepítve',
     }
   })
+}
+
+/** The voice-server supervisor's view (Mission Control starts them, src/lib/agent-os/voice-servers.ts). */
+function voiceSupervisorDetails(): Array<{ label: string; value: string }> {
+  const v = voiceServersStatus()
+  if (!v.enabled) return [{ label: 'Indítás', value: 'külön (AOS_VOICE_SERVERS nincs bekapcsolva)' }]
+  const label: Record<string, string> = { indul: 'indul', fut: 'fut (MC indította)', kulso: 'fut (máshonnan indult)', ujraindul: 'újraindul', leallt: 'leállt', hianyzik: 'hiányzó program' }
+  return v.servers.map(s => ({ label: `Felügyelet: ${s.name} :${s.port}`, value: `${label[s.state] || s.state}${s.restarts ? `, ${s.restarts}× újraindítva` : ''}` }))
 }
