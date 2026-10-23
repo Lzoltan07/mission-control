@@ -131,8 +131,12 @@ export function TeendokGomb() {
   const go = (panel: string) => { setOpen(false); navigate(panel) }
 
   const count = data?.count || 0
-  const placeAbove = pos ? pos.y > window.innerHeight / 2 : true
-  const placeLeft = pos ? pos.x > window.innerWidth / 2 : true
+  // Open towards the side with more room, and never taller than that room (small windows, phones).
+  const rect = open ? box.current?.getBoundingClientRect() : undefined
+  const placeAbove = rect ? rect.top > window.innerHeight - rect.bottom : true
+  const placeLeft = rect ? rect.left > window.innerWidth / 2 : true
+  const room = rect ? (placeAbove ? rect.top : window.innerHeight - rect.bottom) - 24 : 400
+  const maxHeight = Math.max(200, Math.min(room, window.innerHeight * 0.7))
 
   const section = (label: string, n: number, children: React.ReactNode) => (
     <section className="space-y-1">
@@ -157,8 +161,8 @@ export function TeendokGomb() {
       </button>
 
       {open && (
-        <div role="dialog" aria-label="Feladatok és teendők"
-          className={`absolute w-[22rem] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-card p-3 shadow-2xl space-y-3 ${placeAbove ? 'bottom-14' : 'top-14'} ${placeLeft ? 'right-0' : 'left-0'}`}>
+        <div role="dialog" aria-label="Feladatok és teendők" style={{ maxHeight }}
+          className={`absolute w-[22rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-border bg-card p-3 shadow-2xl space-y-3 ${placeAbove ? 'bottom-14' : 'top-14'} ${placeLeft ? 'right-0' : 'left-0'}`}>
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-foreground">Feladatok és teendők</h2>
             <button type="button" className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => void load()}>frissítés</button>
