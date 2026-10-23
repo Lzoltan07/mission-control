@@ -1,7 +1,14 @@
 const withNextIntl = require('next-intl/plugin')('./src/i18n/request.ts')
 
+// Agent OS fork: the exact build shown next to the version in the sidebar header (git describe at build
+// time, e.g. "v2.3.0-aos.19", or "...-dirty" when built from uncommitted code), so a claimed change can be
+// checked against what is actually running.
+let aosBuild = ''
+try { aosBuild = require('node:child_process').execSync('git describe --tags --dirty --always', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch {}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: { NEXT_PUBLIC_AOS_BUILD: aosBuild, NEXT_PUBLIC_AOS_BUILT_AT: new Date().toISOString() },
   output: 'standalone',
   outputFileTracingRoot: __dirname,
   outputFileTracingIncludes: {

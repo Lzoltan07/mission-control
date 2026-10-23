@@ -258,7 +258,10 @@ export function NavRail() {
           {sidebarExpanded && (
             <div className="flex items-baseline gap-2 truncate flex-1 min-w-0">
               <span className="text-sm font-semibold text-foreground truncate">Mission Control</span>
-              <span className="text-2xs text-muted-foreground font-mono-tight shrink-0">v{APP_VERSION}</span>
+              <span className="text-2xs text-muted-foreground font-mono-tight shrink-0"
+                title={process.env.NEXT_PUBLIC_AOS_BUILD ? `Agent OS build: ${process.env.NEXT_PUBLIC_AOS_BUILD} · fordítva: ${new Date(process.env.NEXT_PUBLIC_AOS_BUILT_AT || '').toLocaleString('hu-HU')}` : undefined}>
+                {process.env.NEXT_PUBLIC_AOS_BUILD ? process.env.NEXT_PUBLIC_AOS_BUILD.replace(/^v2.3.0-/, '') : `v${APP_VERSION}`}
+              </span>
             </div>
           )}
           <Button

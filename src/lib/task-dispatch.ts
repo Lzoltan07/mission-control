@@ -1187,25 +1187,33 @@ function buildReviewPrompt(task: ReviewableTask): string {
     lines.push('', '## Agent Resolution', task.resolution.substring(0, 6000))
   }
 
+  // Agent OS fork (2026-10-20): one-line PASS / FIX verdict (the ai-creative-team brand-checker pattern),
+  // in Hungarian, judged against the acceptance criteria. The old VERDICT format is still parsed.
   lines.push(
     '',
-    '## Instructions',
-    'Evaluate whether the agent\'s response adequately addresses the task.',
-    'Respond with EXACTLY one of these two formats:',
+    '## Utasítás',
+    'Bíráld meg, teljesíti-e az eredmény a feladat leírását és minden elfogadási feltételét.',
+    'A válaszod ELSŐ SORA pontosan az egyik legyen:',
     '',
-    'If the work is acceptable:',
-    'VERDICT: APPROVED',
-    'NOTES: <brief summary of why it passes>',
+    'PASS',
+    'FIX: <mit kell javítani, és hol – melyik elfogadási feltétel vagy az eredmény melyik része>',
     '',
-    'If the work needs improvement:',
-    'VERDICT: REJECTED',
-    'NOTES: <specific issues that need to be fixed>',
+    'Több hibánál mindegyik külön sorba kerül, „FIX:” kezdettel. Utána legfeljebb 3 sor rövid indoklás.',
+    'PASS csak akkor, ha minden feltétel teljesül; ha egy állítást nem tudsz ellenőrizni, az FIX.',
   )
 
   return lines.join('\n')
 }
 
 function parseReviewVerdict(text: string): { status: 'approved' | 'rejected'; notes: string } {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  const first = (lines[0] || '').replace(/^[*`_#\s]+|[*`_\s]+$/g, '')
+  // PASS / FIX (Agent OS fork): only an exact PASS first line approves.
+  if (/^PASS$/i.test(first) || /^FIX\b/i.test(first)) {
+    const status = /^PASS$/i.test(first) ? 'approved' as const : 'rejected' as const
+    const notes = (status === 'approved' ? lines.slice(1) : lines).join('\n').trim().substring(0, 2000)
+    return { status, notes: notes || (status === 'approved' ? 'PASS' : 'FIX') }
+  }
   const upper = text.toUpperCase()
   const status = upper.includes('VERDICT: APPROVED') ? 'approved' as const : 'rejected' as const
   const notesMatch = text.match(/NOTES:\s*(.+)/i)
