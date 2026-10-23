@@ -135,7 +135,8 @@ export function TeendokGomb() {
   const rect = open ? box.current?.getBoundingClientRect() : undefined
   const placeAbove = rect ? rect.top > window.innerHeight - rect.bottom : true
   const placeLeft = rect ? rect.left > window.innerWidth / 2 : true
-  const room = rect ? (placeAbove ? rect.top : window.innerHeight - rect.bottom) - 24 : 400
+  // 72 px above: room for the top bar, which would otherwise cover the pop-up's header.
+  const room = rect ? (placeAbove ? rect.top - 72 : window.innerHeight - rect.bottom - 24) : 400
   const maxHeight = Math.max(200, Math.min(room, window.innerHeight * 0.7))
 
   const section = (label: string, n: number, children: React.ReactNode) => (
@@ -147,7 +148,7 @@ export function TeendokGomb() {
   const row = 'flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-secondary/60'
 
   return (
-    <div ref={box} className={`fixed z-40 ${pos ? '' : 'right-4 bottom-36 md:bottom-20'}`} style={pos ? { left: pos.x, top: pos.y } : undefined}>
+    <div ref={box} className={`fixed z-[60] ${pos ? '' : 'right-4 bottom-36 md:bottom-20'}`} style={pos ? { left: pos.x, top: pos.y } : undefined}>
       <button
         type="button" aria-label={`Feladatok és teendők${count ? ` (${count} vár rád)` : ''}`} aria-expanded={open}
         title="Feladatok és teendők (húzással áthelyezhető)"
