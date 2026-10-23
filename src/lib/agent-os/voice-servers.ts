@@ -17,7 +17,7 @@
  *      AOS_WHISPER_ARGS (extra, e.g. "-fa"), AOS_PIPER_PYTHON, AOS_PIPER_VOICE (default the first of
  *      AOS_PIPER_VOICES), AOS_PIPER_DATA_DIR, AOS_VOICE_LOG_DIR (default <MC dir>/../logs).
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -85,6 +85,17 @@ function definitions(): VoiceServer[] {
 
 const pidFile = (s: VoiceServer) => path.join(logDir(), `${s.name}.pid`)
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+/**
+ * Stops a server with everything it started. On Windows a venv's python.exe is only a launcher that runs the
+ * real interpreter as its child (that one holds the port), so the whole tree has to go (taskkill /T).
+ */
+function killTree(pid: number) {
+  if (process.platform === 'win32') {
+    try { spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }) } catch {}
+  } else {
+    try { process.kill(pid) } catch {}
+  }
+}
 
 const logDir = () => process.env.AOS_VOICE_LOG_DIR || path.resolve(process.cwd(), '..', 'logs')
 const RESTART_DELAYS = [5_000, 30_000, 120_000]
@@ -123,7 +134,7 @@ function stopAll() {
   const state = g.__aosVoice
   if (!state || state.stopping) return
   state.stopping = true
-  for (const s of state.servers) { try { s.child?.kill() } catch {} }
+  for (const s of state.servers) if (s.child?.pid) killTree(s.child.pid)
 }
 
 /** Starts the configured voice servers once per Mission Control process. */
@@ -137,7 +148,7 @@ export async function startVoiceServers() {
       let old = 0
       try { old = Number(fs.readFileSync(pidFile(s), 'utf8')) } catch {}
       if (old && alive(old)) {
-        try { process.kill(old) } catch {}
+        killTree(old)
         for (let i = 0; i < 20 && (await isListening(s.port)); i++) await new Promise(res => setTimeout(res, 250))
       }
       if (await isListening(s.port)) { s.state = 'kulso'; continue }
