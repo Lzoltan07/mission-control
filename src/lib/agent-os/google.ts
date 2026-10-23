@@ -456,9 +456,22 @@ export async function tasksList(limit = 30) {
   const out: any[] = []
   for (const l of lists.slice(0, 10)) {
     const t = await getJson(`${TASKS}/lists/${l.id}/tasks?${new URLSearchParams({ showCompleted: 'false', maxResults: '100' })}`)
-    for (const x of t.items || []) out.push({ list: l.title, title: x.title, notes: x.notes || null, due: x.due || null, status: x.status })
+    for (const x of t.items || []) out.push({ id: x.id, listId: l.id, list: l.title, title: x.title, notes: x.notes || null, due: x.due || null, status: x.status })
   }
   return out.slice(0, Math.min(Math.max(limit, 1), 100))
+}
+
+/**
+ * Marks one Google Tasks item done. People only (the Teendők pop-up, /api/agent-os/teendok): agents may
+ * create tasks but never change existing ones, so no agent route calls this.
+ */
+export async function taskComplete(listId: string, taskId: string) {
+  if (!/^[A-Za-z0-9_-]{5,200}$/.test(listId) || !/^[A-Za-z0-9_-]{5,200}$/.test(taskId)) throw new GoogleError('Érvénytelen teendő-azonosító.', 400)
+  const res = await gapi(`${TASKS}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'completed' }),
+  })
+  const t = await res.json()
+  return { id: t.id, title: t.title, status: t.status }
 }
 
 export async function taskCreate(input: { title: string; notes?: string; due?: string }) {

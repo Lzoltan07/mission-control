@@ -41,7 +41,7 @@ import { ChatPagePanel } from '@/components/panels/chat-page-panel'
 import { ChatPanel } from '@/components/chat/chat-panel'
 import { STORAGE_GATEWAY_URL } from '@/lib/device-identity'
 import { getPluginPanel } from '@/lib/plugins'
-import { VoiceAssistant, ExecutionLog, DeviceBeacon } from '@/plugins/agent-os' // Agent OS fork: our tabs, voice button, execution log
+import { VoiceAssistant, TeendokGomb, ExecutionLog, DeviceBeacon } from '@/plugins/agent-os' // Agent OS fork: our tabs, voice and to-do buttons, execution log
 import { shouldRedirectDashboardToHttps } from '@/lib/browser-security'
 import { useTranslations } from 'next-intl'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -502,7 +502,7 @@ export default function Home() {
       {!showOnboarding && <ChatPanel />}
 
       {/* Agent OS fork: always-on voice assistant on every page */}
-      {!showOnboarding && <><VoiceAssistant /><DeviceBeacon /></>}
+      {!showOnboarding && <><VoiceAssistant /><TeendokGomb /><DeviceBeacon /></>}
 
       {/* Global exec approval overlay (shown regardless of active panel) */}
       {!showOnboarding && <ExecApprovalOverlay />}

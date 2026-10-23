@@ -10,6 +10,7 @@ import { FunkciokPanel } from './funkciok-panel'
 import { GooglePanel } from './google-panel'
 
 export { VoiceAssistant } from './voice-assistant'
+export { TeendokGomb } from './teendok-gomb'
 export { ExecutionLog } from './execution-log'
 export { DeviceBeacon } from './device'
 
