@@ -20,7 +20,7 @@ interface Summary {
     inboxCount: number
     emails: Array<{ id: string; to: string; subject: string; requestedBy: string }>
   }
-  teendok: Array<{ id: string; listId: string; list: string; title: string; due: string | null }> | null
+  teendok: Array<{ id: string; listId: string; list: string; title: string; due: string | null; notes: string | null }> | null
   teendokError?: string
   hataridok: Array<{ title: string; start: string; end: string; allDay: boolean; today: boolean }>
   hataridokError?: string
@@ -45,6 +45,7 @@ export function TeendokGomb() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [title, setTitle] = useState('')
+  const [notes, setNotes] = useState('')
   const [due, setDue] = useState('')
   const [target, setTarget] = useState<'google' | 'tabla'>('google')
 
@@ -121,11 +122,11 @@ export function TeendokGomb() {
     if (!text) return
     void run('add', async () => {
       if (target === 'google') {
-        await apiFetch('/api/agent-os/teendok', { method: 'POST', body: JSON.stringify({ action: 'task_create', title: text, due: due || undefined }) })
+        await apiFetch('/api/agent-os/teendok', { method: 'POST', body: JSON.stringify({ action: 'task_create', title: text, notes: notes.trim() || undefined, due: due || undefined }) })
       } else {
-        await apiFetch('/api/tasks', { method: 'POST', body: JSON.stringify({ title: text, status: 'inbox', priority: 'medium' }) })
+        await apiFetch('/api/tasks', { method: 'POST', body: JSON.stringify({ title: text, description: notes.trim() || undefined, status: 'inbox', priority: 'medium' }) })
       }
-      setTitle(''); setDue('')
+      setTitle(''); setNotes(''); setDue('')
     })
   }
   const go = (panel: string) => { setOpen(false); navigate(panel) }
@@ -208,26 +209,32 @@ export function TeendokGomb() {
                   <div key={t.id} className="flex items-start gap-2 px-1.5 py-1 text-sm">
                     <input type="checkbox" aria-label={`Kész: ${t.title}`} className="mt-1" disabled={busy === `done:${t.id}`} onChange={() => void done(t)} />
                     <span className="flex-1"><span className="text-foreground">{t.title}</span>
+                      {t.notes && <span className="block text-xs text-muted-foreground line-clamp-2" title={t.notes}>{t.notes}</span>}
                       {t.due && <span className={`block text-xs ${overdue ? 'text-red-400' : 'text-muted-foreground'}`}>{dueLabel(t.due)}</span>}</span>
                   </div>
                 )
               })}
               {data.teendok && data.teendok.length === 0 && <div className="px-1.5 text-sm text-muted-foreground">Nincs nyitott teendő.</div>}
-              <form onSubmit={add} className="mt-1 flex flex-wrap items-center gap-1 px-1.5">
-                <input value={title} onChange={e => setTitle(e.target.value)} maxLength={200} placeholder="Új teendő…"
-                  className="min-w-0 flex-1 rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground" />
-                {target === 'google' && (
-                  <input type="date" value={due} onChange={e => setDue(e.target.value)} aria-label="Határidő"
-                    className="rounded border border-border bg-secondary px-1 py-1 text-xs text-foreground" />
-                )}
-                <select value={target} onChange={e => setTarget(e.target.value as 'google' | 'tabla')} aria-label="Hová kerüljön"
-                  className="rounded border border-border bg-secondary px-1 py-1 text-xs text-foreground">
-                  <option value="google">Google Tasks</option>
-                  <option value="tabla">Tábla (Bejövő)</option>
-                </select>
-                <button type="submit" disabled={!title.trim() || busy === 'add'} className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50">
-                  {busy === 'add' ? '…' : 'Felvesz'}
-                </button>
+              <form onSubmit={add} className="mt-2 space-y-1 border-t border-border/60 px-1.5 pt-2">
+                <div className="text-xs font-medium text-muted-foreground">Új teendő</div>
+                <input value={title} onChange={e => setTitle(e.target.value)} maxLength={200} placeholder="Cím" aria-label="Cím"
+                  className="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground" />
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} maxLength={5000} rows={3} placeholder="Tartalom (nem kötelező)" aria-label="Tartalom"
+                  className="w-full resize-y rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground" />
+                <div className="flex flex-wrap items-center gap-1">
+                  {target === 'google' && (
+                    <input type="date" value={due} onChange={e => setDue(e.target.value)} aria-label="Határidő"
+                      className="rounded border border-border bg-secondary px-1 py-1 text-xs text-foreground" />
+                  )}
+                  <select value={target} onChange={e => setTarget(e.target.value as 'google' | 'tabla')} aria-label="Hová kerüljön"
+                    className="rounded border border-border bg-secondary px-1 py-1 text-xs text-foreground">
+                    <option value="google">Google Tasks</option>
+                    <option value="tabla">Tábla (Bejövő)</option>
+                  </select>
+                  <button type="submit" disabled={!title.trim() || busy === 'add'} className="ml-auto rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50">
+                    {busy === 'add' ? '…' : 'Felvesz'}
+                  </button>
+                </div>
               </form>
             </div>
           ))}

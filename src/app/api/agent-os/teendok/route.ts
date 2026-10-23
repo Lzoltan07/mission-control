@@ -1,7 +1,7 @@
 /**
  * Agent OS – "Feladatok és teendők" pop-up (fork addition). See src/lib/agent-os/teendok.ts.
  *   GET                                                   admin (people) → summary
- *   POST {action:'task_create', title, due?}              admin → new Google Tasks item
+ *   POST {action:'task_create', title, notes?, due?}      admin → new Google Tasks item
  *   POST {action:'task_done', listId, id}                 admin → Google Tasks item done
  * A new board card goes through Mission Control's own POST /api/tasks (status inbox) from the pop-up.
  * People only: agents have their own, narrower tools (they may create, never complete or change).
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   try {
     switch (body?.action) {
       case 'task_create': {
-        const t = await taskCreate({ title: String(body.title || ''), due: typeof body.due === 'string' && body.due ? body.due : undefined })
+        const t = await taskCreate({ title: String(body.title || ''), notes: typeof body.notes === 'string' && body.notes.trim() ? body.notes : undefined, due: typeof body.due === 'string' && body.due ? body.due : undefined })
         logAuditEvent({ action: 'aos_teendo_create', actor: o.user.username, target_type: 'google_task' })
         return NextResponse.json({ task: t }, { status: 201 })
       }
