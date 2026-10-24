@@ -101,8 +101,11 @@ export default async function RootLayout({
       <head>
         {/* Blocking script to set 'dark' class before first paint, preventing FOUC.
             Content is a static string literal — no user input, no XSS vector. */}
+        {/* Agent OS fork: browsers hide a script's nonce attribute from the DOM, so React (dev) reports a
+            false nonce mismatch on hydration – the attribute is right on the server-rendered element. */}
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('theme')||'void';var light=['light','paper'];if(light.indexOf(t)===-1)document.documentElement.classList.add('dark')}catch(e){}})()`,
           }}

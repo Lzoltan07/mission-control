@@ -8,9 +8,11 @@
  *   - whisper:      large model for commands (port of AOS_WHISPER_URL, default 8178) – only when its port
  *                   differs from the wake port (on the Windows trial both URLs point to the small one)
  *   - piper:        read-aloud (port of AOS_PIPER_URL, default 8179)
- * A server whose port already answers is left alone (started elsewhere) – unless it is our own orphan: the
- * pid files (<log dir>/<name>.pid) remember what we started, so after a forced stop (Windows Stop-Process
- * -Force runs no exit handler) the next start stops that orphan and takes it over again. A crashed server is restarted
+ * A server whose port already answers is left alone (started elsewhere, or by another running Mission Control)
+ * – unless it is a true orphan: the pid file (<log dir>/<name>.pid: "<server pid> <supervisor pid>") says we
+ * started it and that supervisor is gone (e.g. killed with SIGKILL on the Mac); then it is stopped and
+ * taken over. Only the production server supervises: `next dev` starts nothing unless AOS_VOICE_SERVERS_DEV=1
+ * (2026-10-24: a dev instance on :3001 had taken the wake-word server away from the production one). A crashed server is restarted
  * after 5 s, 30 s, 2 min; after 5 crashes within 15 minutes it stays down until Mission Control restarts.
  *
  * Env: AOS_VOICE_SERVERS=1 (on), AOS_WHISPER_BIN, AOS_WAKE_MODEL, AOS_WHISPER_MODEL, AOS_WHISPER_THREADS (4),
@@ -111,14 +113,14 @@ function launch(s: VoiceServer) {
   fs.closeSync(log)
   s.child = child
   s.pid = child.pid ?? null
-  if (s.pid) try { fs.writeFileSync(pidFile(s), String(s.pid)) } catch {}
+  if (s.pid) try { fs.writeFileSync(pidFile(s), `${s.pid} ${process.pid}`) } catch {}
   s.state = 'fut'
   s.startedAt = new Date().toISOString()
   child.once('error', err => { s.lastExit = `nem indult: ${err.message}` })
   child.once('exit', (code, signal) => {
     s.child = undefined
     s.pid = null
-    try { fs.unlinkSync(pidFile(s)) } catch {}
+    try { if (fs.readFileSync(pidFile(s), 'utf8').startsWith(`${child.pid} `)) fs.unlinkSync(pidFile(s)) } catch {}
     if (state.stopping) { s.state = 'leallt'; return }
     s.lastExit = `${new Date().toISOString()} kilépett (${signal || `kód ${code}`})`
     const now = Date.now()
@@ -126,7 +128,12 @@ function launch(s: VoiceServer) {
     if (s.crashes.length >= 5) { s.state = 'leallt'; console.error(`[agent-os] ${s.name}: 15 percen belül 5× összeomlott, nem indítom újra`); return }
     s.state = 'ujraindul'
     const delay = RESTART_DELAYS[Math.min(s.crashes.length - 1, RESTART_DELAYS.length - 1)]
-    setTimeout(() => { s.restarts++; launch(s) }, delay).unref()
+    setTimeout(async () => {
+      // Someone else (another Mission Control, a manual start) holds the port now: leave it to them.
+      if (await isListening(s.port)) { s.state = 'kulso'; return }
+      s.restarts++
+      launch(s)
+    }, delay).unref()
   })
 }
 
@@ -140,14 +147,15 @@ function stopAll() {
 /** Starts the configured voice servers once per Mission Control process. */
 export async function startVoiceServers() {
   if (process.env.AOS_VOICE_SERVERS !== '1' || g.__aosVoice) return
+  if (process.env.NODE_ENV !== 'production' && process.env.AOS_VOICE_SERVERS_DEV !== '1') return
   const servers = definitions()
   g.__aosVoice = { servers, stopping: false }
   for (const s of servers) {
     if (await isListening(s.port)) {
       // Our own orphan from a forced stop? Then stop it and supervise a fresh one; anything else is left alone.
-      let old = 0
-      try { old = Number(fs.readFileSync(pidFile(s), 'utf8')) } catch {}
-      if (old && alive(old)) {
+      let old = 0, owner = 0
+      try { [old, owner] = fs.readFileSync(pidFile(s), 'utf8').trim().split(/\s+/).map(Number) } catch {}
+      if (old && alive(old) && !(owner && owner !== process.pid && alive(owner))) {
         killTree(old)
         for (let i = 0; i < 20 && (await isListening(s.port)); i++) await new Promise(res => setTimeout(res, 250))
       }

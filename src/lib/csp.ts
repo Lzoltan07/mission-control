@@ -6,7 +6,9 @@ export function buildMissionControlCsp(input: { nonce: string; googleEnabled: bo
     `base-uri 'self'`,
     `object-src 'none'`,
     `frame-ancestors 'none'`,
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' blob:${googleEnabled ? ' https://accounts.google.com' : ''}`,
+    // Agent OS fork: 'unsafe-eval' only in development – React's dev build uses eval() for its debugging
+    // features (callstacks); the production build never does, so production keeps the strict policy.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' blob:${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}${googleEnabled ? ' https://accounts.google.com' : ''}`,
     `style-src 'self' 'unsafe-inline'`,
     `style-src-elem 'self' 'unsafe-inline'`,
     `style-src-attr 'unsafe-inline'`,
