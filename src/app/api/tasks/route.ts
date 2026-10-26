@@ -12,6 +12,7 @@ import { pushTaskToGitHub, syncTaskOutbound } from '@/lib/github-sync-engine';
 import { pushTaskToGnap } from '@/lib/gnap-sync';
 import { config } from '@/lib/config';
 import { requireWorkspaceId } from '@/lib/enforcement/workspace-scope';
+import { autonomyLevel } from '@/lib/agent-os/autonomia';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -216,6 +217,11 @@ export async function POST(request: NextRequest) {
     const finalAssignedTo = resolveTaskAssignee(assigned_to, config.coordinatorAgent)
 
     const normalizedStatus = normalizeTaskCreateStatus(status, finalAssignedTo)
+    // Agent OS fork (autonomy review_bypass, locked at level 1): a new task never starts as done – that would skip
+    // the independent Aegis review the status change requires (PUT checks it).
+    if (normalizedStatus === 'done' && autonomyLevel('review_bypass') < 3) {
+      return NextResponse.json({ error: 'A feladat nem jöhet létre „Kész” állapotban: független ellenőrzés kell (review_bypass).' }, { status: 403 })
+    }
 
     // Resolve project_id for the task
     const resolvedProjectId = resolveProjectId(db, workspaceId, project_id)

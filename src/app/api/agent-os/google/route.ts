@@ -22,6 +22,16 @@ import {
   GoogleError, calendarEvents, contactSearch, decideSend, driveRead, driveSave, driveSearch, gmailDraft, gmailRead, gmailSearch,
   googleAgents, googleStatus, pendingRequests, requestSend, syncPendingWithGmail, taskCreate, tasksList,
 } from '@/lib/agent-os/google'
+import { autonomyLevel } from '@/lib/agent-os/autonomia'
+
+// Agent OS autonomy (src/lib/agent-os/autonomia.ts): the same categories and levels the runner gates the
+// agent tools with, checked here again so a call that goes around the runner is refused as well.
+const ACTION_AUTONOMY: Record<string, { key: string; minLevel: number }> = {
+  gmail_draft: { key: 'email_piszkozat', minLevel: 3 },
+  gmail_send_request: { key: 'email_send', minLevel: 2 },
+  drive_save: { key: 'drive_mentes', minLevel: 3 },
+  task_create: { key: 'google_teendo', minLevel: 3 },
+}
 
 function fail(err: unknown) {
   if (err instanceof GoogleError) return NextResponse.json({ error: err.message }, { status: err.status })
@@ -92,6 +102,14 @@ export async function POST(request: NextRequest) {
     }
     const who = toolUser(request)
     if (who instanceof NextResponse) return who
+    const gate = ACTION_AUTONOMY[String(action)]
+    if (gate) {
+      const level = autonomyLevel(gate.key)
+      if (level < gate.minLevel) {
+        logAuditEvent({ action: 'aos_autonomia_denied', actor: who.actor, target_type: 'autonomia', detail: { key: gate.key, level, action } })
+        return NextResponse.json({ error: `Az autonómia-szint (${gate.key}: ${level}) ezt nem engedi; írd le a lépést a tulajdonosnak.` }, { status: 403 })
+      }
+    }
     let result: unknown
     switch (action) {
       case 'gmail_draft':

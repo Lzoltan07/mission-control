@@ -10,6 +10,7 @@ import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { FUNCTIONS, type FunctionStatus } from '@/lib/agent-os/functions-catalog'
+import { AutonomiaPanel } from './autonomia-panel'
 
 const STATE_STYLE: Record<FunctionStatus['state'], { dot: string; label: string }> = {
   ok: { dot: 'bg-green-500', label: 'Működik' },
@@ -115,6 +116,8 @@ export function FunkciokPanel() {
           </div>
         </section>
       ))}
+
+      <AutonomiaPanel />
     </div>
   )
 }
